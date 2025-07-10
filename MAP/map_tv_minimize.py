@@ -44,7 +44,10 @@ def huber_tv_2d(x, eps):
     dx = x[:,1:] - x[:,:-1] # horizontal (j+1 - j)
     dy = x[1:,:] - x[:-1,:] # vertical (i+1 - i)
 
-    pass
+    tv_x = huber_penalty_function(dx, eps).sum()
+    tv_y = huber_penalty_function(dy, eps).sum()
+
+    return tv_x + tv_y
 
 
 
