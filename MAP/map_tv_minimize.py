@@ -1,33 +1,34 @@
 import numpy as np
 # from scipy.optimize import minimize   
 
+'''
 def least_squares_solver(A, y):
-    '''
+    
     Computes the least squares problem: minimize ||Ax - y||^2 in the 2-norm
     A: numpy.ndarray, shape (m, n), forward model
     y: numpy.ndarray, shape (m,), measurement 
     x: solution vector (unmeasured data, desired image)
-    '''
+    
     x = np.linalg.lstsq(A, y, rcond=None)
 
     # possibility to return residuals
     return x
+'''
 
-def huber_penalty_function(t, eps):
+def A(x, M):
     '''
-    Computes the Huber penalty function
+    Compute the composition of 2D discrete Fourier Transform + apply mask
+    Returns a (complex) ndarray type
     '''
-    
-    abs_t = np.abs(t)
-    quad = (t**2) / (2*eps)
-    lin = abs_t - (eps/2)
-    return np.where(abs_t >= eps, lin, quad) # condition if |t| >= eps; return lin, else return quad 
 
-def huber_penalty_function_grad(t, eps):
+    return M * np.fft.fft2(x) 
+
+def A_adj(k_residual, M):
     '''
-    Computes the derivative of the Huber penalty function
+    Compute the adjoint of A
     '''
-    return np.where(np.abs(t) >= eps, np.sign(t), t/eps)
+    return np.fft.ifft2(M * k_residual)
+
 
 def huber_tv_2d(x, eps): 
     '''
@@ -39,7 +40,16 @@ def huber_tv_2d(x, eps):
     dx: horizontal differences (n, m-1)
     dy: vertical differences (n-1, m)
     '''
-
+    def huber_penalty_function(t, eps): # t and eps both free variables?
+        '''
+        Computes the Huber penalty function
+        '''
+        
+        abs_t = np.abs(t)
+        quad = (t**2) / (2*eps)
+        lin = abs_t - (eps/2)
+        return np.where(abs_t >= eps, lin, quad) # condition if |t| >= eps; return lin, else return quad 
+    
     # Compute the finite differences
     dx = x[:,1:] - x[:,:-1] # horizontal (j+1 - j)
     dy = x[1:,:] - x[:-1,:] # vertical (i+1 - i)
@@ -49,7 +59,11 @@ def huber_tv_2d(x, eps):
 
     return tv_x + tv_y
 
-
+def huber_penalty_function_grad(t, eps): # optional?
+    '''
+    Computes the derivative of the Huber penalty function
+    '''
+    return np.where(np.abs(t) >= eps, np.sign(t), t/eps)
 
 
 
