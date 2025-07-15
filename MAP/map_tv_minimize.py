@@ -15,7 +15,7 @@ def least_squares_solver(A, y):
     return x
 '''
 
-def A(x, M):
+def compute_A(x, M):
     '''
     Compute the composition of 2D discrete Fourier Transform + apply mask
     Returns a (complex) ndarray type
@@ -23,12 +23,64 @@ def A(x, M):
 
     return M * np.fft.fft2(x) 
 
-def A_adj(k_residual, M):
+def compute_A_adj(k_residual, M):
     '''
     Compute the adjoint of A
     '''
     return np.fft.ifft2(M * k_residual)
 
+
+def data_fidelity_gradient(x, y, M, sigma):
+    '''
+    k_residual: Ax - y <-> M * F(x) - y ... error between predicted & measured k-space data, has dimensions of k-space(=residual)
+    Returns the gradient (derived after x) of the data fidelity term (1/2*sigma * ||Ax - y||^2)
+    '''
+    
+    Ax = compute_A(x, M)
+    k_residual = Ax - y 
+    grad = compute_A_adj(M, k_residual) / sigma**2
+    return grad
+
+def finite_diff_gradient(x): # we are assuming that x is a 2D image
+    '''
+    Computes the forward finite differences
+    Input: 2D array
+    Output: 2 arrays
+    Returns the horizontal and vertical gradient
+    Question: current implementation is using wrap-around, is this reasonable?
+    '''
+
+    grad_x = np.roll(x, -1, axis=1) - x # horizontal, shift columns 1 position to the left and subtract with x
+    grad_y = np.roll(x, -1, axis=0) - x # vertical
+
+    return grad_x, grad_y
+
+def gradient_magnitude(x):
+    '''
+    Computes the magnitude of the gradient: g = sqrt(g_x^2 + g_y^2)
+    '''
+
+    grad_x, grad_y = finite_diff_gradient(x)
+    return np.sqrt(grad_x**2 + grad_y**2 + 1e-8) # adding a small term to avoid division by zero
+
+def huber_penalty_function_grad(x, eps): # =huber weights
+    '''
+    Computes the derivative of the Huber penalty function
+    '''
+
+    mag = gradient_magnitude(x)
+    return np.where(mag >= eps, 1.0, mag/eps)  # mag always >0, so no need for np.abs(mag) >= eps, np.sign(mag), ...
+
+def divergence(norm_grad_x, norm_grad_y):
+    '''
+    Computes the divergence of a vector field
+    Input: 2 arrays (vector field)
+    Output: 2D array (scalar)
+    '''
+
+    div_x = norm_grad_x - np.roll(norm_grad_x, 1, axis=1)
+    div_y = norm_grad_y - np.roll(norm_grad_y, 1, axis=0)
+    return div_x + div_y
 
 def huber_tv_2d(x, eps): 
     '''
@@ -51,20 +103,69 @@ def huber_tv_2d(x, eps):
         return np.where(abs_t >= eps, lin, quad) # condition if |t| >= eps; return lin, else return quad 
     
     # Compute the finite differences
-    dx = x[:,1:] - x[:,:-1] # horizontal (j+1 - j)
-    dy = x[1:,:] - x[:-1,:] # vertical (i+1 - i)
+
+    dx, dy = finite_diff_gradient(x)
+
+    #dx = x[:,1:] - x[:,:-1] # horizontal (j+1 - j)... sub-optimal implementation (shape mismatch, no boundary)
+    #dy = x[1:,:] - x[:-1,:] # vertical (i+1 - i) 
 
     tv_x = huber_penalty_function(dx, eps).sum()
     tv_y = huber_penalty_function(dy, eps).sum()
 
     return tv_x + tv_y
 
-def huber_penalty_function_grad(t, eps): # optional?
-    '''
-    Computes the derivative of the Huber penalty function
-    '''
-    return np.where(np.abs(t) >= eps, np.sign(t), t/eps)
+# start of implementation of Huber-TV subgradient
 
+def huber_tv_subgradient(x, eps):
+    '''
+    Computes the subgradient of TV
+    Return: subgradient of TV
+    There is a divergence used at the end -> divergence maps back to scalar - same shape as x (image)
+    '''
+
+    grad_x, grad_y = finite_diff_gradient(x)
+    mag = gradient_magnitude(x)
+    weights = huber_penalty_function_grad(x, eps)
+
+    # normalize - gradient direction * scalar weight -> gives a directional subgradient
+    norm_grad_x = weights * grad_x
+    norm_grad_y = weights * grad_y
+
+    return -divergence(norm_grad_x, norm_grad_y) 
+
+def subgradient_descent(x_init, y, M, lambda_, eps, sigma, learning_rate, max_iters):
+    '''
+    Minimization function
+    '''
+
+    x = x_init.copy()
+    for i in range(max_iters):
+        # Ax = compute_A(x,M) # forward model
+        # z = Ax - y # residual
+        gradient_data = data_fidelity_gradient(x, y, M, sigma)
+        gradient_tv = huber_tv_subgradient(x, eps)
+        gradient = gradient_data + lambda_ * gradient_tv
+        x -= learning_rate * gradient
+    
+    return x
+
+
+'''
+for iteration in range(max_iters):
+# Inputs: y (measured k-space), M, lambda, sigma, eps (huber threshold), step size, max_iters
+    # Data fidelity gradient
+    residual = A(x) - y
+    grad_data = A_adjoint(residual) / sigma^2
+
+    # Compute Huber TV subgradient
+    grad_tv = huber_tv_subgradient(x, delta)
+
+    # Total subgradient
+    subgrad = grad_data + lambda * grad_tv
+
+    # Step update
+    x -= learning_rate * (data_fidelity_grad + λ * tv_subgrad)
+'''
 
 
 """
@@ -99,11 +200,6 @@ if __name__ == "__main__":
     
     x_min = map_tv_minimize(x, y, lambda_tv, max_iter)
     print("Optimized image shape:", x_min.shape)
-    # Further processing can be done with x_min
 
-    # Note: The actual implementation of the optimization algorithm is not provided.
-    # You would need to implement the logic for minimizing total variation here.    
-
-    # For example, you could use gradient descent or another optimization method.
 '''
 
