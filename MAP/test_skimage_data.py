@@ -32,5 +32,6 @@ def simple_column_mask(shape, stride):
 
 plt.imshow(shepp_logan, cmap='gray')
 plt.title('Shepp-Logan phantom')
-#print(shepp_logan[12, 12])
+print(shepp_logan[134, 201])
+print(np.min(shepp_logan), np.max(shepp_logan), np.mean(shepp_logan))
 plt.show()
