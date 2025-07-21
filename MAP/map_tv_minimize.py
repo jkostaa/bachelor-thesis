@@ -2,16 +2,16 @@ import numpy as np
 # from scipy.optimize import minimize   
 
 '''
-def least_squares_solver(A, y):
-    
-    Computes the least squares problem: minimize ||Ax - y||^2 in the 2-norm
-    A: numpy.ndarray, shape (m, n), forward model
-    y: numpy.ndarray, shape (m,), measurement 
-    x: solution vector (unmeasured data, desired image)
-    
-    x = np.linalg.lstsq(A, y, rcond=None)
+Inputs for the MAP estimation algorithm:
 
-    # possibility to return residuals
+x_init: initial guess for image x, 2D real or complex array, shape of the image -> why do i need this?
+y: complex-valued 2D array, shape (rows, cols), actual MRI measurement after under-sampling in F-domain
+M: sampling mask, shape (same as y), with 0 where data isn't sampled
+sigma: noise variance, positive scalar, float
+lambda_: regularization parameter. positive scalar, float
+eps: Huber threshold parameter, small positive scalar, float
+max_iters: number of gradient descent steps, int 
+learning_rate: gradient descent step size, float
     return x
 '''
 

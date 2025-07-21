@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+
+*.pyc
+*$py.class
+
+.vscode/
+*.log
