@@ -1,86 +1,106 @@
 import numpy as np
 # from scipy.optimize import minimize   
 
-'''
-Inputs for the MAP estimation algorithm:
+# Implementation of the class
 
-x_init: initial guess for image x, 2D real or complex array, shape of the image -> why do i need this?
-y: complex-valued 2D array, shape (rows, cols), actual MRI measurement after under-sampling in F-domain
-M: sampling mask, shape (same as y), with 0 where data isn't sampled
-sigma: noise variance, positive scalar, float
-lambda_: regularization parameter. positive scalar, float
-eps: Huber threshold parameter, small positive scalar, float
-max_iters: number of gradient descent steps, int 
-learning_rate: gradient descent step size, float
+class MAPEstimator:
+    '''
+    Inputs for the MAP estimation algorithm:
+
+    x_init: initial guess for image x, 2D real or complex array, shape of the image -> why do i need this?
+    y: complex-valued 2D array, shape (rows, cols), actual MRI measurement after under-sampling in F-domain
+    M: sampling mask, shape (same as y), with 0 where data isn't sampled
+    sigma: noise variance, positive scalar, float
+    lambda_: regularization parameter. positive scalar, float
+    eps: Huber threshold parameter, small positive scalar, float
+    max_iters: number of gradient descent steps, int 
+    learning_rate: gradient descent step size, float
     return x
-'''
 
-def compute_A(x, M):
+    x_init and y as input parameters?
     '''
-    Compute the composition of 2D discrete Fourier Transform + apply mask
-    Returns a (complex) ndarray type
-    '''
+    def __init__(self, M, sigma, lambda_, eps, learning_rate=0.1, max_iters=100):
+        self.M = M
+        self.lambda_ = lambda_
+        self.sigma = sigma
+        self.eps = eps
+        self.learning_rate = learning_rate
+        self.max_iters = max_iters
+        pass
 
-    return M * np.fft.fft2(x) 
+    def A(self, x):
+        '''
+        Defined as: A = M * F
+        Compute the composition of 2D discrete Fourier Transform + apply mask
+        Returns a (complex) ndarray type
+        '''
 
-def compute_A_adj(k_residual, M):
-    '''
-    Compute the adjoint of A
-    '''
-    return np.fft.ifft2(M * k_residual)
+        return self.M * np.fft.fft2(x)
 
+    def A_adj(self, k_residual):
+        '''
+        Compute the adjoint of A
+        '''
+        return np.fft.ifft2(self.M * k_residual).real # added .real
 
-def data_fidelity_gradient(x, y, M, sigma):
-    '''
-    k_residual: Ax - y <-> M * F(x) - y ... error between predicted & measured k-space data, has dimensions of k-space(=residual)
-    Returns the gradient (derived after x) of the data fidelity term (1/2*sigma * ||Ax - y||^2)
-    '''
+    def data_fidelity_gradient(self, x, y):
+        '''
+        k_residual: Ax - y <-> M * F(x) - y ... error between predicted & measured k-space data, has dimensions of k-space(=residual)
+        Returns the gradient (derived after x) of the data fidelity term (1/2*sigma * ||Ax - y||^2)
+        '''
+
+        residual = self.A(x) - y
+        grad = self.A_adj(residual) /self.sigma**2
+        return grad
     
-    Ax = compute_A(x, M)
-    k_residual = Ax - y 
-    grad = compute_A_adj(M, k_residual) / sigma**2
-    return grad
+    def finite_diff_gradient(self, x): # we are assuming that x is a 2D image
+        '''
+        Computes the forward finite differences
+        Input: 2D array
+        Output: 2 arrays
+        Returns the horizontal and vertical gradient
+        Question: current implementation is using wrap-around, is this reasonable?
+        '''
 
-def finite_diff_gradient(x): # we are assuming that x is a 2D image
-    '''
-    Computes the forward finite differences
-    Input: 2D array
-    Output: 2 arrays
-    Returns the horizontal and vertical gradient
-    Question: current implementation is using wrap-around, is this reasonable?
-    '''
+        '''
+        alternative implementation
+        gx = np.zeros_like(x)
+        gy = np.zeros_like(x)
+        gx[:, :-1] = x[:, 1:] - x[:, :-1]
+        gy[:-1, :] = x[1:, :] - x[:-1, :]
+        '''
+        
+        grad_x = np.roll(x, -1, axis=1) - x # horizontal, shift columns 1 position to the left and subtract with x
+        grad_y = np.roll(x, -1, axis=0) - x # vertical
 
-    grad_x = np.roll(x, -1, axis=1) - x # horizontal, shift columns 1 position to the left and subtract with x
-    grad_y = np.roll(x, -1, axis=0) - x # vertical
+        return grad_x, grad_y
 
-    return grad_x, grad_y
+    def gradient_magnitude(self, x):
+        '''
+        Computes the magnitude of the gradient: g = sqrt(g_x^2 + g_y^2)
+        '''
 
-def gradient_magnitude(x):
-    '''
-    Computes the magnitude of the gradient: g = sqrt(g_x^2 + g_y^2)
-    '''
+        grad_x, grad_y = self.finite_diff_gradient(x)
+        return np.sqrt(grad_x**2 + grad_y**2 + 1e-8) # adding a small term to avoid division by zero
 
-    grad_x, grad_y = finite_diff_gradient(x)
-    return np.sqrt(grad_x**2 + grad_y**2 + 1e-8) # adding a small term to avoid division by zero
+    def huber_penalty_function_grad(self, x, eps): # =huber weights
+        '''
+        Computes the derivative of the Huber penalty function
+        '''
 
-def huber_penalty_function_grad(x, eps): # =huber weights
-    '''
-    Computes the derivative of the Huber penalty function
-    '''
+        mag = self.gradient_magnitude(x)
+        return np.where(mag >= eps, 1.0, mag/eps)  # mag always >0, so no need for np.abs(mag) >= eps, np.sign(mag), ...
 
-    mag = gradient_magnitude(x)
-    return np.where(mag >= eps, 1.0, mag/eps)  # mag always >0, so no need for np.abs(mag) >= eps, np.sign(mag), ...
-
-def divergence(norm_grad_x, norm_grad_y):
-    '''
-    Computes the divergence of a vector field
-    Input: 2 arrays (vector field)
-    Output: 2D array (scalar)
-    '''
-
-    div_x = norm_grad_x - np.roll(norm_grad_x, 1, axis=1)
-    div_y = norm_grad_y - np.roll(norm_grad_y, 1, axis=0)
-    return div_x + div_y
+    def divergence(self, norm_grad_x, norm_grad_y):
+        '''
+        Computes the divergence of a vector field
+        Input: 2 arrays (vector field)
+        Output: 2D array (scalar)
+        '''
+        
+        div_x = norm_grad_x - np.roll(norm_grad_x, 1, axis=1)
+        div_y = norm_grad_y - np.roll(norm_grad_y, 1, axis=0)
+        return div_x + div_y
 
 def huber_tv_2d(x, eps): 
     '''
