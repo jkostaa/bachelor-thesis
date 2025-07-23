@@ -35,9 +35,12 @@ class MAPEstimator:
         Returns a (complex) ndarray type
         '''
 
+        x = np.clip(x, -1e6, 1e6) # avoiding large numbers
+        # alt: x = x / np.max(np.abs(x))  # normalize to max=1, if max != 0
+
         return self.M * np.fft.fft2(x)
 
-    def A_adj(self, k_residual):
+    def A_adj(self, k_residual): 
         '''
         Compute the adjoint of A
         '''
@@ -81,15 +84,19 @@ class MAPEstimator:
         '''
 
         grad_x, grad_y = self.finite_diff_gradient(x)
+
+        grad_x = np.clip(grad_x, -1e6, 1e6) # clipping to avoid very large numbers
+        grad_y = np.clip(grad_y, -1e6, 1e6)
+
         return np.sqrt(grad_x**2 + grad_y**2 + 1e-8) # adding a small term to avoid division by zero
 
-    def huber_penalty_function_grad(self, x, eps): # =huber weights
+    def huber_penalty_function_grad(self, x): # =huber weights
         '''
         Computes the derivative of the Huber penalty function
         '''
 
         mag = self.gradient_magnitude(x)
-        return np.where(mag >= eps, 1.0, mag/eps)  # mag always >0, so no need for np.abs(mag) >= eps, np.sign(mag), ...
+        return np.where(mag >= self.eps, 1.0, mag / self.eps)  # mag always >0, so no need for np.abs(mag) >= eps, np.sign(mag), ...
 
     def divergence(self, norm_grad_x, norm_grad_y):
         '''
@@ -102,72 +109,74 @@ class MAPEstimator:
         div_y = norm_grad_y - np.roll(norm_grad_y, 1, axis=0)
         return div_x + div_y
 
-def huber_tv_2d(x, eps): 
-    '''
-    A function that computes the Huber total variation of a 2D array (resembling a picture made up of n x m pixels)
+    def huber_tv_2d(self, x): 
+        '''
+        A function that computes the Huber total variation of a 2D array (resembling a picture made up of n x m pixels)
 
-    Parameters:
-    x: ndarray of shape (n,m) - the input image -> approximated x
-    eps: float, threshold value (threshold between quadratic and linear region)
-    dx: horizontal differences (n, m-1)
-    dy: vertical differences (n-1, m)
-    '''
-    def huber_penalty_function(t, eps): # t and eps both free variables?
+        Parameters:
+        x: ndarray of shape (n,m) - the input image -> approximated x
+        eps: float, threshold value (threshold between quadratic and linear region)
+        dx: horizontal differences (n, m-1)
+        dy: vertical differences (n-1, m)
         '''
-        Computes the Huber penalty function
-        '''
+        def huber_penalty_function(t=1): # t free variable?
+            '''
+            Computes the Huber penalty function
+            '''
+            
+            abs_t = np.abs(t)
+            quad = (t**2) / (2*self.eps)
+            lin = abs_t - (self.eps/2)
+            return np.where(abs_t >= self.eps, lin, quad) # condition if |t| >= eps; return lin, else return quad 
         
-        abs_t = np.abs(t)
-        quad = (t**2) / (2*eps)
-        lin = abs_t - (eps/2)
-        return np.where(abs_t >= eps, lin, quad) # condition if |t| >= eps; return lin, else return quad 
-    
-    # Compute the finite differences
+        # Compute the finite differences
 
-    dx, dy = finite_diff_gradient(x)
+        dx, dy = self.finite_diff_gradient(x)
 
-    #dx = x[:,1:] - x[:,:-1] # horizontal (j+1 - j)... sub-optimal implementation (shape mismatch, no boundary)
-    #dy = x[1:,:] - x[:-1,:] # vertical (i+1 - i) 
+        #dx = x[:,1:] - x[:,:-1] # horizontal (j+1 - j)... sub-optimal implementation (shape mismatch, no boundary)
+        #dy = x[1:,:] - x[:-1,:] # vertical (i+1 - i) 
 
-    tv_x = huber_penalty_function(dx, eps).sum()
-    tv_y = huber_penalty_function(dy, eps).sum()
+        tv_x = huber_penalty_function(dx, self.eps).sum()
+        tv_y = huber_penalty_function(dy, self.eps).sum()
 
-    return tv_x + tv_y
+        return tv_x + tv_y
 
 # start of implementation of Huber-TV subgradient
 
-def huber_tv_subgradient(x, eps):
-    '''
-    Computes the subgradient of TV
-    Return: subgradient of TV
-    There is a divergence used at the end -> divergence maps back to scalar - same shape as x (image)
-    '''
+    def huber_tv_subgradient(self, x):
+        '''
+        Computes the subgradient of TV
+        Return: subgradient of TV
+        There is a divergence used at the end -> divergence maps back to scalar - same shape as x (image)
+        '''
 
-    grad_x, grad_y = finite_diff_gradient(x)
-    mag = gradient_magnitude(x)
-    weights = huber_penalty_function_grad(x, eps)
+        grad_x, grad_y = self.finite_diff_gradient(x)
+        #mag = self.gradient_magnitude(x)
+        weights = self.huber_penalty_function_grad(x)
 
-    # normalize - gradient direction * scalar weight -> gives a directional subgradient
-    norm_grad_x = weights * grad_x
-    norm_grad_y = weights * grad_y
+        # normalize - gradient direction * scalar weight -> gives a directional subgradient
+        norm_grad_x = weights * grad_x
+        norm_grad_y = weights * grad_y
 
-    return -divergence(norm_grad_x, norm_grad_y) 
+        return -self.divergence(norm_grad_x, norm_grad_y) 
 
-def subgradient_descent(x_init, y, M, lambda_, eps, sigma, learning_rate, max_iters):
-    '''
-    Minimization function
-    '''
+    def subgradient_descent(self, y, x_init=None):
+        '''
+        Minimization function
+        '''
 
-    x = x_init.copy()
-    for i in range(max_iters):
-        # Ax = compute_A(x,M) # forward model
-        # z = Ax - y # residual
-        gradient_data = data_fidelity_gradient(x, y, M, sigma)
-        gradient_tv = huber_tv_subgradient(x, eps)
-        gradient = gradient_data + lambda_ * gradient_tv
-        x -= learning_rate * gradient
-    
-    return x
+        x = x_init if x_init is not None else np.zeros_like(np.fft.ifft2(y).real)
+        #x_init = np.fft.ifft2(self.M * np.fft.fft2(x)).real
+        #x = x_init.copy()
+        for i in range(self.max_iters):
+            # Ax = compute_A(x,M) # forward model
+            # z = Ax - y # residual
+            gradient_data = self.data_fidelity_gradient(x, y)
+            gradient_tv = self.huber_tv_subgradient(x)
+            gradient = gradient_data + self.lambda_ * gradient_tv
+            x -= self.learning_rate * gradient
+        
+        return x
 
 
 '''
