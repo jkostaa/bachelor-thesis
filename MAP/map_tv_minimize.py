@@ -7,7 +7,7 @@ class MAPEstimator:
     '''
     Inputs for the MAP estimation algorithm:
 
-    x_init: initial guess for image x, 2D real or complex array, shape of the image -> why do i need this?
+    x_init: initial guess for image x, 2D real or complex array, shape of the image 
     y: complex-valued 2D array, shape (rows, cols), actual MRI measurement after under-sampling in F-domain
     M: sampling mask, shape (same as y), with 0 where data isn't sampled
     sigma: noise variance, positive scalar, float
@@ -17,7 +17,6 @@ class MAPEstimator:
     learning_rate: gradient descent step size, float
     return x
 
-    x_init and y as input parameters?
     '''
     def __init__(self, M, sigma, lambda_, eps, learning_rate=0.1, max_iters=100):
         self.M = M
@@ -26,7 +25,6 @@ class MAPEstimator:
         self.eps = eps
         self.learning_rate = learning_rate
         self.max_iters = max_iters
-        pass
 
     def A(self, x):
         '''
@@ -169,13 +167,18 @@ class MAPEstimator:
         #x_init = np.fft.ifft2(self.M * np.fft.fft2(x)).real
         #x = x_init.copy()
         for i in range(self.max_iters):
-            # Ax = compute_A(x,M) # forward model
-            # z = Ax - y # residual
+            a = self.A(x) # for print check
+            residual = self.A(x) - y # for print check
+            adjoint = self.A_adj(residual) # for print check
             gradient_data = self.data_fidelity_gradient(x, y)
             gradient_tv = self.huber_tv_subgradient(x)
             gradient = gradient_data + self.lambda_ * gradient_tv
             x -= self.learning_rate * gradient
-        
+            #print(f"Iteration {i}, update norm: {np.linalg.norm(self.learning_rate * gradient)}")
+            #print(f"Iteration {i}, value of gradient: {gradient}")
+            #print("Gradient Data Norm:", np.linalg.norm(gradient_data))
+            #print("Gradient TV Norm:", np.linalg.norm(gradient_tv))
+            #print(f"Iteration {i}: A_adj(residual) min={adjoint.min():.2e}, max={adjoint.max():.2e}, mean={adjoint.mean():.2e}, norm={np.linalg.norm(a):.2e}")
         return x
 
 

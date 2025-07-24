@@ -48,3 +48,26 @@ class SimpleMask:
             M[j, :] = 0
             
         return M    
+    
+
+class BernoulliMask:
+    '''
+    Creates a matrix of 1s and 0s randomly
+    Parameters:
+    - p: probability of keeping a value (from 0 to 1)
+    - seed: optional seed for reproducibility
+    '''
+
+    def __init__(self, p, seed=None):
+        self.p = p
+        self.seed = seed
+        if seed is not None:
+            np.random.seed(seed)
+        
+    def generate(self, shape):
+        '''
+        - shape: tuple (n, m), the shape of the mask
+        Returns:
+        - mask: (n, m) ndarray of 0s and 1s
+        '''
+        return np.random.binomial(n=1, p=self.p, size=shape)

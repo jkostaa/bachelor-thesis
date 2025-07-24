@@ -19,9 +19,12 @@ np.set_printoptions(threshold=np.inf)
 # load the image
 shepp_logan = ski.data.shepp_logan_phantom()
 
-column_mask = SimpleMask(2).mask_columns(shepp_logan)
+# create mask (in the F domain of course)
+column_mask = SimpleMask(4).mask_columns(shepp_logan)
+row_mask = SimpleMask(3).mask_rows(shepp_logan)
 
-map_estimator = MAPEstimator(column_mask, 1e-3, 0.05, 1e-2)
+# init the MAP
+map_estimator = MAPEstimator(column_mask, 1e-3, 0.05, 1e-2, 0.01, 200)
 
 # FFT
 #kspace_shepp = np.fft.fft2(shepp_logan)
