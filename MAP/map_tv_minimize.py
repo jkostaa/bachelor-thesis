@@ -1,4 +1,7 @@
 import numpy as np
+from scipy.ndimage import sobel
+from skimage.filters import scharr_h, scharr_v
+from scipy.ndimage import gaussian_filter
 # from scipy.optimize import minimize   
 
 # Implementation of the class
@@ -64,15 +67,27 @@ class MAPEstimator:
         '''
 
         '''
-        alternative implementation
-        gx = np.zeros_like(x)
-        gy = np.zeros_like(x)
-        gx[:, :-1] = x[:, 1:] - x[:, :-1]
-        gy[:-1, :] = x[1:, :] - x[:-1, :]
+        #alternative implementation
+        grad_x = np.zeros_like(x)
+        grad_y = np.zeros_like(x)
+        #grad_x[:, :-1] = x[:, 1:] - x[:, :-1]
+        grad_x[:, 1:-1] = (x[:, 2:] - x[:, :-2]) / 2
+
+        #grad_y[:-1, :] = x[1:, :] - x[:-1, :]
+        grad_y[1:-1, :] = (x[2:, :] - x[:-2, :]) / 2
         '''
         
         grad_x = np.roll(x, -1, axis=1) - x # horizontal, shift columns 1 position to the left and subtract with x
         grad_y = np.roll(x, -1, axis=0) - x # vertical
+
+        #grad_x = sobel(x, axis=1, mode='reflect')  # Horizontal gradient
+        #grad_y = sobel(x, axis=0, mode='reflect')  # Vertical gradient
+
+        #grad_x = scharr_h(x)
+        #grad_y = scharr_v(x)
+
+        #grad_x = gaussian_filter(x, sigma=1, order=[0,1])
+        #grad_y = gaussian_filter(x, sigma=1, order=[1,0])
 
         return grad_x, grad_y
 
@@ -158,27 +173,36 @@ class MAPEstimator:
 
         return -self.divergence(norm_grad_x, norm_grad_y) 
 
-    def subgradient_descent(self, y, x_init=None):
+    def subgradient_descent(self, y):
         '''
         Minimization function
         '''
 
-        x = x_init if x_init is not None else np.zeros_like(np.fft.ifft2(y).real)
-        #x_init = np.fft.ifft2(self.M * np.fft.fft2(x)).real
+        #x = x_init if x_init is not None else np.zeros_like(np.fft.ifft2(y).real)
+        x = np.zeros_like(np.fft.ifft2(y).real)
+        #x = np.random.rand(400,400)
+        #x = np.fft.ifft2(self.M * np.fft.fft2(x_init)).real
         #x = x_init.copy()
+        #x_prev = x.copy() # for print check
         for i in range(self.max_iters):
             a = self.A(x) # for print check
             residual = self.A(x) - y # for print check
             adjoint = self.A_adj(residual) # for print check
+            grad_x, grad_y = self.finite_diff_gradient(x) # print check
             gradient_data = self.data_fidelity_gradient(x, y)
             gradient_tv = self.huber_tv_subgradient(x)
+            #print(f"Iteration {i}: grad_x min={grad_x.min():.2e}, max={grad_x.max():.2e}, mean={grad_x.mean():.2e}")
+            #print(f"Iteration {i}: grad_y min={grad_y.min():.2e}, max={grad_y.max():.2e}, mean={grad_y.mean():.2e}")
             gradient = gradient_data + self.lambda_ * gradient_tv
             x -= self.learning_rate * gradient
+            #print(f"Iter {i}: ||x - x_prev|| = {np.linalg.norm(x - x_prev):.2e}")
             #print(f"Iteration {i}, update norm: {np.linalg.norm(self.learning_rate * gradient)}")
             #print(f"Iteration {i}, value of gradient: {gradient}")
+            #print(f"Iter {i}: grad norm = {np.linalg.norm(gradient):.2e}")
             #print("Gradient Data Norm:", np.linalg.norm(gradient_data))
             #print("Gradient TV Norm:", np.linalg.norm(gradient_tv))
             #print(f"Iteration {i}: A_adj(residual) min={adjoint.min():.2e}, max={adjoint.max():.2e}, mean={adjoint.mean():.2e}, norm={np.linalg.norm(a):.2e}")
+            #print(f"Iteration {i}: A min={a.min():.2e}, max={a.max():.2e}, mean={a.mean():.2e}, norm={np.linalg.norm(a):.2e}")
         return x
 
 
