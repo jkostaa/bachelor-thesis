@@ -132,7 +132,7 @@ class MAPEstimator:
         dx: horizontal differences (n, m-1)
         dy: vertical differences (n-1, m)
         '''
-        def huber_penalty_function(t=1): # t free variable?
+        def huber_penalty_function(t=1): 
             '''
             Computes the Huber penalty function
             '''
@@ -185,25 +185,49 @@ class MAPEstimator:
         #x = x_init.copy()
         #x_prev = x.copy() # for print check
         for i in range(self.max_iters):
-            a = self.A(x) # for print check
-            residual = self.A(x) - y # for print check
-            adjoint = self.A_adj(residual) # for print check
-            grad_x, grad_y = self.finite_diff_gradient(x) # print check
+            #a = self.A(x) # for print check
+            #residual = self.A(x) - y # for print check
+            #adjoint = self.A_adj(residual) # for print check
+            #grad_x, grad_y = self.finite_diff_gradient(x) # print check
             gradient_data = self.data_fidelity_gradient(x, y)
             gradient_tv = self.huber_tv_subgradient(x)
-            #print(f"Iteration {i}: grad_x min={grad_x.min():.2e}, max={grad_x.max():.2e}, mean={grad_x.mean():.2e}")
             #print(f"Iteration {i}: grad_y min={grad_y.min():.2e}, max={grad_y.max():.2e}, mean={grad_y.mean():.2e}")
             gradient = gradient_data + self.lambda_ * gradient_tv
+
+            #noise = np.random.randn(*x.shape) # Langevin part
             x -= self.learning_rate * gradient
-            #print(f"Iter {i}: ||x - x_prev|| = {np.linalg.norm(x - x_prev):.2e}")
+            #x += np.sqrt(2 * self.learning_rate) * noise # Langevin part
+
             #print(f"Iteration {i}, update norm: {np.linalg.norm(self.learning_rate * gradient)}")
             #print(f"Iteration {i}, value of gradient: {gradient}")
-            #print(f"Iter {i}: grad norm = {np.linalg.norm(gradient):.2e}")
-            #print("Gradient Data Norm:", np.linalg.norm(gradient_data))
-            #print("Gradient TV Norm:", np.linalg.norm(gradient_tv))
             #print(f"Iteration {i}: A_adj(residual) min={adjoint.min():.2e}, max={adjoint.max():.2e}, mean={adjoint.mean():.2e}, norm={np.linalg.norm(a):.2e}")
-            #print(f"Iteration {i}: A min={a.min():.2e}, max={a.max():.2e}, mean={a.mean():.2e}, norm={np.linalg.norm(a):.2e}")
         return x
+
+    def langevin_sampling(self, y, num_samples=100, burn_in=150, sample_every=10):
+        '''
+        Parameters:
+        - y: ndarray, undersampled k-space data
+        - num_samples: int, how many samples to return after burn-in
+        - burn_in: int, number of initial steps to discard before collecting (tries to avoid bias due to x_init)
+        - sample_every: int, interval between storing samples
+        '''
+
+        x = np.ones_like(np.fft.ifft2(y).real) # initialized with zero-filled inverse FFT
+        samples = []
+
+        for i in range(burn_in + num_samples * sample_every):
+            gradient_data = self.data_fidelity_gradient(x, y)
+            gradient_tv = self.huber_tv_subgradient(x)
+            gradient = gradient_data + self.lambda_ * gradient_tv
+
+            noise = np.random.randn(*x.shape)
+            x -= self.learning_rate * gradient
+            x += np.sqrt(2 * self.learning_rate) * noise
+
+            if i >= burn_in and (i - burn_in) % sample_every == 0:
+                samples.append(np.copy(x))
+
+        return samples
 
 
 '''
