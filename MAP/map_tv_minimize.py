@@ -237,7 +237,7 @@ class MAPEstimator:
         - sample_every: int, interval between storing samples
         """
 
-        x = np.ones_like(
+        x = np.zeros_like(
             np.fft.ifft2(y).real
         )  # initialized with zero-filled inverse FFT
         samples = []

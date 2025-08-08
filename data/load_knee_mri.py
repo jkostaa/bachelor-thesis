@@ -1,9 +1,21 @@
 import os
-from fastmri.data import SliceDataset
+from fastmri.data.mri_data import SliceDataset
+from fastmri.data.transforms import VarNetDataTransform
+from fastmri.data.transforms import to_tensor
 
-# from fastmri.data.transforms import ComplexCenterCrop
-# from torch.utils.data import ConcatDataset
+transform = VarNetDataTransform(
+    mask_func= None,
+    use_seed= False
+)
 
+def minimal_dict_transform(kspace, target, attrs, fname, slice_num, *args, **kwargs):
+    return {
+        "kspace": to_tensor(kspace),
+        "target": to_tensor(target) if target is not None else None,
+        "attrs": attrs,
+        "fname": fname,
+        "slice_num": slice_num
+    }
 
 def load_fastmri_data(base_path=None):
     if base_path is None:
