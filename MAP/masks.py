@@ -166,3 +166,64 @@ class VariableDensityMask:
         """
         prob_map = self.probability_map(shape)
         return np.random.binomial(1, prob_map)
+
+class PseudoRandomColumnMask:
+    def __init__(self, shape, acceleration, seed=None):
+        """
+        Parameters:
+        - shape: tuple (h, w)
+        - acceleration: int, undersampling factor (e.g., 4 or 8)
+        - seed: random seed for reproducibility
+        """
+
+        assert acceleration in [2, 4, 6, 8], "Only acceleration factors 4 and 8 are supported."
+
+        self.shape = shape
+        self.acceleration = acceleration
+        self.seed = seed
+        if seed is not None:
+            np.random.seed(seed)
+
+        self.mask = self._create_mask()
+
+    def _create_mask(self):
+        height, width = self.shape
+
+        if self.acceleration == 4:
+            center_fraction = 0.08
+        elif self.acceleration == 8:
+            center_fraction = 0.04
+        elif self.acceleration == 6:
+            center_fraction = 0.06
+        elif self.acceleration == 2:
+            center_fraction = 0.1   
+
+        center_cols = int(round(width * center_fraction)) # number of fully sampled center columns
+        if center_cols % 2 == 0:
+            center_cols += 1  # odd for symmetry
+
+        mask = np.zeros((height, width), dtype=np.float32) # init
+
+        # fill in the center region (centred horizontally)
+        center_start = width // 2 - center_cols // 2
+        center_end = center_start + center_cols
+        mask[:, center_start:center_end] = 1
+
+        total_sampled_cols = int(round(width / self.acceleration))
+
+        # Number of additional columns to randomly sample
+        num_random_cols = total_sampled_cols - center_cols
+        if num_random_cols < 0:
+            num_random_cols = 0 
+
+        # indices outside the center region
+        candidate_cols = list(range(0, center_start)) + list(range(center_end, width))
+
+        if num_random_cols > 0:
+            random_cols = np.random.choice(candidate_cols, size=num_random_cols, replace=False)
+            mask[:, random_cols] = 1
+        
+        return mask
+    
+    def get_mask(self):
+        return self.mask

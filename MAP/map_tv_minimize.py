@@ -2,7 +2,7 @@ import numpy as np
 
 # from scipy.ndimage import sobel
 # from skimage.filters import scharr_h, scharr_v
-# from scipy.ndimage import gaussian_filter
+import scipy.ndimage
 
 # from scipy.optimize import minimize
 
@@ -44,7 +44,8 @@ class MAPEstimator:
         x = np.clip(x, -1e6, 1e6)  # avoiding large numbers
         # alt: x = x / np.max(np.abs(x))  # normalize to max=1, if max != 0
 
-        return self.M * np.fft.fft2(x)
+        # self.M * np.fft.fft2(x) / np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(x), norm='ortho'))
+        return self.M * np.fft.fft2(x) 
 
     def A_adj(self, k_residual):
         """
@@ -119,7 +120,7 @@ class MAPEstimator:
 
         mag = self.gradient_magnitude(x)
         return np.where(
-            mag >= self.eps, 1.0, mag / self.eps
+            mag >= self.eps, 1.0 / mag, mag / self.eps
         )  # mag always >0, so no need for np.abs(mag) >= eps, np.sign(mag), ...
 
     def divergence(self, norm_grad_x, norm_grad_y):
@@ -194,14 +195,22 @@ class MAPEstimator:
         '''
         data_term = np.linalg.norm(self.A(x) - y) ** 2 / (2 * self.sigma**2)
         tv_term = self.lambda_ * self.huber_tv_2d(x)
-        return data_term  + tv_term
+        return data_term + tv_term
 
     def subgradient_descent(self, y):
         """
         Minimization function
         """
-        # print("Starting subgradient descent...")
+        
+        self.grad_norm_history = []
         # x = x_init if x_init is not None else np.zeros_like(np.fft.ifft2(y).real)
+        
+        #noise = np.random.randn(*np.fft.ifft2(y).real.shape)
+        #x = scipy.ndimage.gaussian_filter(noise, sigma=5)
+        # x = np.ones_like(np.fft.ifft2(y).real) * 0.5
+
+        # x = np.random.randn(*np.fft.ifft2(y).real.shape)
+
         x = np.zeros_like(np.fft.ifft2(y).real)
 
         # x = np.fft.ifft2(self.M * np.fft.fft2(x_init)).real
@@ -214,9 +223,11 @@ class MAPEstimator:
             # print(f"Iteration {i}: grad_y min={grad_y.min():.2e}, max={grad_y.max():.2e}, mean={grad_y.mean():.2e}")
             gradient = gradient_data + self.lambda_ * gradient_tv
 
-            # noise = np.random.randn(*x.shape) # Langevin part
+            grad_norm = np.linalg.norm(gradient)
+            self.grad_norm_history.append(grad_norm)
+
             x -= self.learning_rate * gradient
-            # x += np.sqrt(2 * self.learning_rate) * noise # Langevin part
+
             # print(f"Iteration {i}, update norm: {np.linalg.norm(self.learning_rate * gradient)}")
 
             # computing the loss
@@ -225,6 +236,13 @@ class MAPEstimator:
 
             if i % 10 == 0:
                 print(f"Iter {i}: Loss = {loss:.8f}")
+                print(f"Iter {i}: Gradient = {grad_norm:.8f}")
+                #print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
+                #print("data_term =", np.linalg.norm(self.A(x) - y)**2 / (2*self.sigma**2))
+                #print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
+                #print("||grad_data|| =", np.linalg.norm(gradient_data))
+                #print("||grad_tv|| =", np.linalg.norm(gradient_tv))
+                #print("grad min/max:", gradient.min(), gradient.max())
 
         return x
 
@@ -238,7 +256,7 @@ class MAPEstimator:
         """
 
         x = np.zeros_like(
-            np.fft.ifft2(y).real
+           np.fft.ifft2(y).real
         )  # initialized with zero-filled inverse FFT
         samples = []
 
@@ -272,40 +290,4 @@ for iteration in range(max_iters):
 
     # Step update
     x -= learning_rate * (data_fidelity_grad + λ * tv_subgrad)
-"""
-
-
-"""
-def map_tv_minimize(x, y, lambda_tv=0.1, max_iter=100):
-    
-    Minimize the total variation of the image x with respect to y.
-    
-    Parameters:
-    - x: Input image (numpy array).
-    - y: Target image (numpy array).
-    - lambda_tv: Regularization parameter for total variation.
-    - max_iter: Maximum number of iterations for optimization.
-    
-    Returns:
-    - x_min: Optimized image after minimizing total variation.
-    
-    # Placeholder for the optimization logic
-    # This is where you would implement the actual minimization algorithm
-    x_min = x  # For now, just return the input image as a placeholder
-    
-    return x_min
-"""
-
-
-"""
-# Example usage:
-if __name__ == "__main__":
-    x = np.random.rand(100, 100)  # Example input image
-    y = np.random.rand(100, 100)  # Example target image
-    lambda_tv = 0.1
-    max_iter = 100
-    
-    x_min = map_tv_minimize(x, y, lambda_tv, max_iter)
-    print("Optimized image shape:", x_min.shape)
-
 """
