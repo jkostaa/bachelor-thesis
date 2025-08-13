@@ -273,21 +273,3 @@ class MAPEstimator:
                 samples.append(np.copy(x))
 
         return samples
-
-
-"""
-for iteration in range(max_iters):
-# Inputs: y (measured k-space), M, lambda, sigma, eps (huber threshold), step size, max_iters
-    # Data fidelity gradient
-    residual = A(x) - y
-    grad_data = A_adjoint(residual) / sigma^2
-
-    # Compute Huber TV subgradient
-    grad_tv = huber_tv_subgradient(x, delta)
-
-    # Total subgradient
-    subgrad = grad_data + lambda * grad_tv
-
-    # Step update
-    x -= learning_rate * (data_fidelity_grad + λ * tv_subgrad)
-"""
