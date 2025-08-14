@@ -176,7 +176,7 @@ class PseudoRandomColumnMask:
         - seed: random seed for reproducibility
         """
 
-        assert acceleration in [2, 4, 6, 8], "Only acceleration factors 4 and 8 are supported."
+        assert acceleration in [2, 4, 6, 8], "Only acceleration factors 2, 4, 6 and 8 are supported."
 
         self.shape = shape
         self.acceleration = acceleration

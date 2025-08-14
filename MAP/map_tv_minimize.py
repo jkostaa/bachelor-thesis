@@ -2,7 +2,6 @@ import numpy as np
 
 # from scipy.ndimage import sobel
 # from skimage.filters import scharr_h, scharr_v
-import scipy.ndimage
 
 # from scipy.optimize import minimize
 
@@ -41,17 +40,43 @@ class MAPEstimator:
         Returns a (complex) ndarray type
         """
 
-        x = np.clip(x, -1e6, 1e6)  # avoiding large numbers
+        #x = np.clip(x, -1e6, 1e6)  # avoiding large numbers
         # alt: x = x / np.max(np.abs(x))  # normalize to max=1, if max != 0
 
         # self.M * np.fft.fft2(x) / np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(x), norm='ortho'))
-        return self.M * np.fft.fft2(x) 
+        return self.M * np.fft.fft2(x, norm='ortho') 
 
     def A_adj(self, k_residual):
         """
         Compute the adjoint of A
         """
-        return np.fft.ifft2(self.M * k_residual).real  # added .real
+        return np.fft.ifft2(self.M * k_residual, norm='ortho')  # added .real
+
+    def adjoint_test(self, shape):
+        """
+        Sanity check for <A x, y> ≈ <x, A^* y>.
+        A: forward operator 
+        A_adj: adjoint operator 
+        shape: tuple
+
+        prints abs error.
+        """
+        # rand test vectors
+        x = np.random.randn(*shape) + 1j * np.random.randn(*shape)
+        y = np.random.randn(*self.A(x).shape) + 1j * np.random.randn(*self.A(x).shape)
+
+        lhs = np.vdot(self.A(x), y)          # <A x, y>
+        rhs = np.vdot(x, self.A_adj(y))      # <x, A* y>
+
+        abs_err = np.abs(lhs - rhs)
+        rel_err = abs_err / max(np.abs(lhs), 1e-14) # 1e-14 term there, just to avoid zero division
+
+        # print(f"<A x, y>  = {lhs}")
+        # print(f"<x, A* y> = {rhs}")
+        # print(f"Absolute error: {abs_err:.3e}")
+        # print(f"Relative error: {rel_err:.3e}")
+
+        return abs_err, rel_err
 
     def data_fidelity_gradient(self, x, y):
         """
@@ -60,7 +85,7 @@ class MAPEstimator:
         """
 
         residual = self.A(x) - y
-        grad = self.A_adj(residual) / self.sigma**2
+        grad = self.A_adj(residual).real / self.sigma**2
         return grad
 
     def finite_diff_gradient(self, x):  # we are assuming that x is a 2D image
@@ -113,15 +138,18 @@ class MAPEstimator:
             grad_x**2 + grad_y**2 + 1e-8
         )  # adding a small term to avoid division by zero
 
-    def huber_penalty_function_grad(self, x):  # =huber weights
+    def huber_penalty_function_grad(self, dx, dy):  # =huber weights
         """
-        Computes the derivative of the Huber penalty function
+        Computes the derivative of the Huber penalty function w.r.t. dx, dy.
         """
 
-        mag = self.gradient_magnitude(x)
-        return np.where(
-            mag >= self.eps, 1.0 / mag, mag / self.eps
-        )  # mag always >0, so no need for np.abs(mag) >= eps, np.sign(mag), ...
+        abs_dx = np.abs(dx)
+        abs_dy = np.abs(dy)
+
+        grad_dx = np.where(abs_dx >= self.eps, np.sign(dx), dx / self.eps,)
+        grad_dy = np.where(abs_dy >= self.eps, np.sign(dy), dy / self.eps)
+
+        return grad_dx, grad_dy 
 
     def divergence(self, norm_grad_x, norm_grad_y):
         """
@@ -145,9 +173,11 @@ class MAPEstimator:
         dy: vertical differences (n-1, m)
         """
 
-        def huber_penalty_function(eps, t):
+        def huber_penalty_function(t, eps):
             """
-            Computes the Huber penalty function
+            Computes the Huber penalty function: quadratic for |t| <= eps, linear otherwise.
+            t: array (differences, e.g. residuals)
+            eps: scalar threshold
             """
 
             abs_t = np.abs(t)
@@ -178,15 +208,13 @@ class MAPEstimator:
         There is a divergence used at the end -> divergence maps back to scalar - same shape as x (image)
         """
 
-        grad_x, grad_y = self.finite_diff_gradient(x)
+        dx, dy = self.finite_diff_gradient(x)
         # mag = self.gradient_magnitude(x)
-        weights = self.huber_penalty_function_grad(x)
+        grad_dx, grad_dy = self.huber_penalty_function_grad(dx, dy)
 
         # normalize - gradient direction * scalar weight -> gives a directional subgradient
-        norm_grad_x = weights * grad_x
-        norm_grad_y = weights * grad_y
 
-        return -self.divergence(norm_grad_x, norm_grad_y)
+        return -self.divergence(grad_dx, grad_dy)
 
     def compute_loss(self, x, y):
         '''
