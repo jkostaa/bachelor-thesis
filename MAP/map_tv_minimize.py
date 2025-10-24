@@ -5,6 +5,12 @@ import numpy as np
 
 # from scipy.optimize import minimize
 
+import os
+import sys
+project_root = os.path.abspath(os.path.join(os.getcwd(), r"C:\Users\kostanjsek\bachelor_project"))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 # Implementation of the class
 
 
@@ -24,14 +30,15 @@ class MAPEstimator:
 
     """
 
-    def __init__(self, M, sigma, lambda_, eps, learning_rate=0.1, max_iters=100):
+    def __init__(self, M, sigma, lambda_, eps):
         self.M = M
         self.lambda_ = lambda_
         self.sigma = sigma
         self.eps = eps
-        self.learning_rate = learning_rate
-        self.max_iters = max_iters
         self.loss_history = []
+
+    # Forward and adjoint operators
+
 
     def A(self, x):
         """
@@ -78,6 +85,8 @@ class MAPEstimator:
 
         return abs_err, rel_err
 
+    # Gradients and TV
+
     def data_fidelity_gradient(self, x, y):
         """
         k_residual: Ax - y <-> M * F(x) - y ... error between predicted & measured k-space data, has dimensions of k-space(=residual)
@@ -94,7 +103,6 @@ class MAPEstimator:
         Input: 2D array
         Output: 2 arrays
         Returns the horizontal and vertical gradient
-        Question: current implementation is using wrap-around, is this reasonable?
         """
 
         """
@@ -113,17 +121,11 @@ class MAPEstimator:
         )  # horizontal, shift columns 1 position to the left and subtract with x
         grad_y = np.roll(x, -1, axis=0) - x  # vertical
 
-        # grad_x = sobel(x, axis=1, mode='reflect')  # Horizontal gradient
-        # grad_y = sobel(x, axis=0, mode='reflect')  # Vertical gradient
-
-        # grad_x = scharr_h(x)
-        # grad_y = scharr_v(x)
-
-        # grad_x = gaussian_filter(x, sigma=1, order=[0,1])
-        # grad_y = gaussian_filter(x, sigma=1, order=[1,0])
+        # grad_x, grad_y = np.gradient(x)
 
         return grad_x, grad_y
 
+    '''
     def gradient_magnitude(self, x):
         """
         Computes the magnitude of the gradient: g = sqrt(g_x^2 + g_y^2)
@@ -137,12 +139,18 @@ class MAPEstimator:
         return np.sqrt(
             grad_x**2 + grad_y**2 + 1e-8
         )  # adding a small term to avoid division by zero
+    '''
 
     def huber_penalty_function_grad(self, dx, dy):  # =huber weights
         """
         Computes the derivative of the Huber penalty function w.r.t. dx, dy.
         """
-
+        t = np.sqrt(dx**2 + dy**2)
+        w = np.where(t <= self.eps, 1.0 / self.eps, 1.0 / (t + 1e-12))
+        grad_dx = w * dx
+        grad_dy = w * dy
+        return grad_dx, grad_dy
+    
         abs_dx = np.abs(dx)
         abs_dy = np.abs(dy)
 
@@ -173,6 +181,7 @@ class MAPEstimator:
         dy: vertical differences (n-1, m)
         """
 
+        '''
         def huber_penalty_function(t, eps):
             """
             Computes the Huber penalty function: quadratic for |t| <= eps, linear otherwise.
@@ -186,18 +195,22 @@ class MAPEstimator:
             return np.where(
                 abs_t >= eps, lin, quad
             )  # condition if |t| >= eps; return lin, else return quad
-
+        '''
         # Compute the finite differences
 
         dx, dy = self.finite_diff_gradient(x)
+        t = np.sqrt(dx**2 + dy**2 + 1e-8) # + 1e-8 to avoid division through 0
+        quad = (t**2) / (2 * self.eps)
+        lin = np.abs(t) - (self.eps / 2) # np.abs(t) or just t
+        tv = np.where(t <= self.eps, quad, lin)
 
         # dx = x[:,1:] - x[:,:-1] # horizontal (j+1 - j)... sub-optimal implementation (shape mismatch, no boundary)
         # dy = x[1:,:] - x[:-1,:] # vertical (i+1 - i)
 
-        tv_x = huber_penalty_function(dx, self.eps)
-        tv_y = huber_penalty_function(dy, self.eps)
+        #tv_x = huber_penalty_function(dx, self.eps)
+        #tv_y = huber_penalty_function(dy, self.eps)
 
-        return tv_x.sum() + tv_y.sum()
+        return tv.sum()
 
     # start of implementation of Huber-TV subgradient
 
@@ -211,7 +224,6 @@ class MAPEstimator:
         dx, dy = self.finite_diff_gradient(x)
         # mag = self.gradient_magnitude(x)
         grad_dx, grad_dy = self.huber_penalty_function_grad(dx, dy)
-
         # normalize - gradient direction * scalar weight -> gives a directional subgradient
 
         return -self.divergence(grad_dx, grad_dy)
@@ -225,25 +237,22 @@ class MAPEstimator:
         tv_term = self.lambda_ * self.huber_tv_2d(x)
         return data_term + tv_term
 
-    def subgradient_descent(self, y):
+    def subgradient_descent(self, y, x_init=None, learning_rate=0.1, max_iters=100):
         """
         Minimization function
         """
-        
+    
         self.grad_norm_history = []
-        # x = x_init if x_init is not None else np.zeros_like(np.fft.ifft2(y).real)
         
-        #noise = np.random.randn(*np.fft.ifft2(y).real.shape)
-        #x = scipy.ndimage.gaussian_filter(noise, sigma=5)
-        # x = np.ones_like(np.fft.ifft2(y).real) * 0.5
+        # x = np.zeros_like(np.fft.ifft2(y).real)
 
-        # x = np.random.randn(*np.fft.ifft2(y).real.shape)
+        if x_init is None:
+            x = np.real(np.fft.ifft2(y))
+        else:
+            x = np.array(x_init, dtype=float)
 
-        x = np.zeros_like(np.fft.ifft2(y).real)
 
-        # x = np.fft.ifft2(self.M * np.fft.fft2(x_init)).real
-        # x = x_init.copy()
-        for i in range(self.max_iters):
+        for i in range(max_iters):
             # a = self.A(x) # for print check
 
             gradient_data = self.data_fidelity_gradient(x, y)
@@ -254,7 +263,7 @@ class MAPEstimator:
             grad_norm = np.linalg.norm(gradient)
             self.grad_norm_history.append(grad_norm)
 
-            x -= self.learning_rate * gradient
+            x -= learning_rate * gradient
 
             # print(f"Iteration {i}, update norm: {np.linalg.norm(self.learning_rate * gradient)}")
 
@@ -262,42 +271,15 @@ class MAPEstimator:
             loss = self.compute_loss(x, y)
             self.loss_history.append(loss)
 
-            if i % 10 == 0:
-                print(f"Iter {i}: Loss = {loss:.8f}")
-                print(f"Iter {i}: Gradient = {grad_norm:.8f}")
-                #print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
-                #print("data_term =", np.linalg.norm(self.A(x) - y)**2 / (2*self.sigma**2))
-                #print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
-                #print("||grad_data|| =", np.linalg.norm(gradient_data))
-                #print("||grad_tv|| =", np.linalg.norm(gradient_tv))
-                #print("grad min/max:", gradient.min(), gradient.max())
+            # if i % 10 == 0:
+            #     print(f"Iter {i}: Loss = {loss:.8f}")
+            #     print(f"Iter {i}: Gradient = {grad_norm:.8f}")
+            #     #print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
+            #     #print("data_term =", np.linalg.norm(self.A(x) - y)**2 / (2*self.sigma**2))
+            #     #print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
+            #     #print("||grad_data|| =", np.linalg.norm(gradient_data))
+            #     #print("||grad_tv|| =", np.linalg.norm(gradient_tv))
+            #     #print("grad min/max:", gradient.min(), gradient.max())
 
         return x
 
-    def langevin_sampling(self, y, num_samples=100, burn_in=150, sample_every=10):
-        """
-        Parameters:
-        - y: ndarray, undersampled k-space data
-        - num_samples: int, how many samples to return after burn-in
-        - burn_in: int, number of initial steps to discard before collecting (tries to avoid bias due to x_init)
-        - sample_every: int, interval between storing samples
-        """
-
-        x = np.zeros_like(
-           np.fft.ifft2(y).real
-        )  # initialized with zero-filled inverse FFT
-        samples = []
-
-        for i in range(burn_in + num_samples * sample_every):
-            gradient_data = self.data_fidelity_gradient(x, y)
-            gradient_tv = self.huber_tv_subgradient(x)
-            gradient = gradient_data + self.lambda_ * gradient_tv
-
-            noise = np.random.randn(*x.shape)
-            x -= self.learning_rate * gradient
-            x += np.sqrt(2 * self.learning_rate) * noise
-
-            if i >= burn_in and (i - burn_in) % sample_every == 0:
-                samples.append(np.copy(x))
-
-        return samples

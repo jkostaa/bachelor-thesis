@@ -1,55 +1,93 @@
 import numpy as np
+from sympy import I
 
 
 class SimpleMask:
     def __init__(self, step):
         """
         Parameters:
-        - step: how often to mask out a row/column (3 means mask out every 3rd)
+        - step: how often to sample a row/column (3 means sample every 3rd)
         """
 
         self.step = step
 
     def mask_columns(self, x):
         """
-        Create a mask that masks out every 'step'-th column.
+        Create a mask that samples every 'step'-th column.
 
         Parameters:
         - x: (n,m) matrix
 
         Returns:
-        - M: matrix with 0s in all masked columns
+        - M: matrix with 1s in all sampled columns
         """
 
         rows, cols = x.shape
-        M = np.ones((rows, cols), dtype=np.float32)
+        M = np.zeros((rows, cols), dtype=np.float32) 
         # masked_matrix = np.copy(x)
 
-        for j in range(1, cols, self.step):
-            M[:, j] = 0
+        for i in range(0, cols, self.step):
+            M[:, i] = 1
 
         return M
 
     def mask_rows(self, x):
         """
-        Create a mask that masks out every 'step'-th rows.
+        Create a mask that samples every 'step'-th rows.
 
         Parameters:
         - x: (n,m) matrix
 
         Returns:
-        - M: matrix with 0s in all masked rows
+        - M: matrix with 1s in all sampled rows
         """
 
         rows, cols = x.shape
-        M = np.ones((rows, cols), dtype=np.float32)
+        M = np.zeros((rows, cols), dtype=np.float32) # use np.zeros for masking
         # masked_matrix = np.copy(x)
 
-        for j in range(1, rows, self.step):
-            M[j, :] = 0
+        for j in range(0, rows, self.step):
+            M[j, :] = 1 # use value 0 for masking
 
         return M
 
+class SimpleMask2D:
+    def __init__(self, row_step=None, col_step=None):
+
+        """
+        Parameters:
+        - row_step: sampling interval for rows (None = no row masking)
+        - col_step: sampling interval for columns (None = no column masking)
+        """
+
+        self.row_step = row_step
+        self.col_step = col_step
+
+    def get_mask(self, x):
+        """
+        Create a 2D sampling mask (both rows + columns)
+        
+        Parameters:
+        - x: (n, m) matrix
+        
+        Returns:
+        - M: mask with 1s at sampled positions, 0s elsewhere
+        """
+
+        rows, cols = x.shape
+        M = np.zeros((rows, cols), dtype=np.float32)
+
+        # Sample rows
+        if self.row_step is not None:
+            for i in range(0, rows, self.row_step):
+                M[i, :] = 1
+
+        # Sample columns
+        if self.col_step is not None:
+            for j in range(0, cols, self.col_step):
+                M[:, j] = 1
+
+        return M
 
 class BernoulliMask:
     """
