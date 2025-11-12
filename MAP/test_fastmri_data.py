@@ -11,7 +11,7 @@ if project_root not in sys.path:
 
 from data.load_knee_mri import load_fastmri_data
 from map_tv_minimize import MAPEstimator
-from masks import BernoulliMask, CenteredBernoulliMask, VariableDensityMask
+from utilities.masks import BernoulliMask, CenteredBernoulliMask, VariableDensityMask
 
 train_dataset, val_dataset, test_dataset = load_fastmri_data(
     r"C:\Users\kostanjsek\Documents\knee_mri"

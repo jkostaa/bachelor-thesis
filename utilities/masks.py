@@ -1,8 +1,7 @@
 import numpy as np
 from sympy import I
 
-
-class SimpleMask:
+class SimpleMask: # not relevant for thesis
     def __init__(self, step):
         """
         Parameters:
@@ -11,7 +10,7 @@ class SimpleMask:
 
         self.step = step
 
-    def mask_columns(self, x):
+    def mask_columns(self, shape):
         """
         Create a mask that samples every 'step'-th column.
 
@@ -22,7 +21,7 @@ class SimpleMask:
         - M: matrix with 1s in all sampled columns
         """
 
-        rows, cols = x.shape
+        rows, cols = shape
         M = np.zeros((rows, cols), dtype=np.float32) 
         # masked_matrix = np.copy(x)
 
@@ -31,7 +30,7 @@ class SimpleMask:
 
         return M
 
-    def mask_rows(self, x):
+    def mask_rows(self, shape):
         """
         Create a mask that samples every 'step'-th rows.
 
@@ -42,7 +41,7 @@ class SimpleMask:
         - M: matrix with 1s in all sampled rows
         """
 
-        rows, cols = x.shape
+        rows, cols = shape
         M = np.zeros((rows, cols), dtype=np.float32) # use np.zeros for masking
         # masked_matrix = np.copy(x)
 
@@ -51,7 +50,7 @@ class SimpleMask:
 
         return M
 
-class SimpleMask2D:
+class SimpleMask2D: # not relevant for thesis
     def __init__(self, row_step=None, col_step=None):
 
         """
@@ -63,7 +62,7 @@ class SimpleMask2D:
         self.row_step = row_step
         self.col_step = col_step
 
-    def get_mask(self, x):
+    def get_mask(self, shape):
         """
         Create a 2D sampling mask (both rows + columns)
         
@@ -74,7 +73,7 @@ class SimpleMask2D:
         - M: mask with 1s at sampled positions, 0s elsewhere
         """
 
-        rows, cols = x.shape
+        rows, cols = shape
         M = np.zeros((rows, cols), dtype=np.float32)
 
         # Sample rows
@@ -205,12 +204,66 @@ class VariableDensityMask:
         prob_map = self.probability_map(shape)
         return np.random.binomial(1, prob_map)
 
-class PseudoRandomColumnMask:
+class UniformColumnMask:
     def __init__(self, shape, acceleration, seed=None):
+        """
+        Uniform (non-random) 1D Cartesian undersampling mask.
+        
+        Parameters:
+        - shape: tuple (h, w)
+        - acceleration: int, undersampling factor (e.g., 2, 4, 6, 8)
+        - seed: unused (kept for compatibility)
+        """
+        assert acceleration in [2, 4, 6, 8], "Only acceleration factors 2, 4, 6, and 8 are supported."
+
+        self.shape = shape
+        self.acceleration = acceleration
+        self.mask = self._create_mask()
+
+    def _create_mask(self):
+        height, width = self.shape
+
+        # center fraction definitions (same as before)
+        if self.acceleration == 4:
+            center_fraction = 0.08
+        elif self.acceleration == 8:
+            center_fraction = 0.04
+        elif self.acceleration == 6:
+            center_fraction = 0.06
+        elif self.acceleration == 2:
+            center_fraction = 0.10
+
+        center_cols = int(round(width * center_fraction))
+        if center_cols % 2 == 0:
+            center_cols += 1
+
+        mask = np.zeros((height, width), dtype=np.float32)
+
+        # Fully sampled center region
+        center_start = width // 2 - center_cols // 2
+        center_end = center_start + center_cols
+        mask[:, center_start:center_end] = 1
+
+        # Uniformly spaced outer columns
+        step = self.acceleration  # every R-th column
+        # Choose offset so that sampling is symmetric around center
+        offset = (width // 2) % step
+
+        for col in range(0, width, step):
+            if col < center_start or col >= center_end:
+                mask[:, col] = 1
+
+        return mask
+
+    def get_mask(self):
+        return self.mask
+
+class PseudoRandomColumnMask:
+    def __init__(self, shape, acceleration, lam, seed=None):
         """
         Parameters:
         - shape: tuple (h, w)
-        - acceleration: int, undersampling factor (e.g., 4 or 8)
+        - acceleration: int, undersampling factor (e.g., 2, 4, 6 or 8)
         - seed: random seed for reproducibility
         """
 
@@ -218,6 +271,7 @@ class PseudoRandomColumnMask:
 
         self.shape = shape
         self.acceleration = acceleration
+        self.lam = lam # controls steepness of decay
         self.seed = seed
         if seed is not None:
             np.random.seed(seed)
@@ -253,15 +307,72 @@ class PseudoRandomColumnMask:
         num_random_cols = total_sampled_cols - center_cols
         if num_random_cols < 0:
             num_random_cols = 0 
+            return mask
 
-        # indices outside the center region
-        candidate_cols = list(range(0, center_start)) + list(range(center_end, width))
+        distances = np.abs(np.arange(width) - width / 2)
+        distances = distances / np.max(distances)  # normalize [0, 1]
 
-        if num_random_cols > 0:
-            random_cols = np.random.choice(candidate_cols, size=num_random_cols, replace=False)
-            mask[:, random_cols] = 1
+        #probs = np.exp(-self.lam * distances) # exponential decay
+        probs = np.exp(-self.lam * distances**2) # gaussian decay
+
+        probs[center_start:center_end] = 0
+        probs = probs / np.sum(probs)
+
+        candidate_cols = np.arange(width)
+        random_cols = np.random.choice(candidate_cols, size=num_random_cols, replace=False, p=probs)
+        mask[:, random_cols] = 1
         
         return mask
     
     def get_mask(self):
         return self.mask
+    
+
+class RadialMask:
+    def __init__(self, shape, num_spokes, center_fraction=0.05):
+        
+        """
+        Create a binary radial undersampling mask.
+        
+        Parameters
+        ----------
+        shape : tuple (H, W)
+            Mask size (assumed square or nearly square).
+        num_spokes : int
+            Number of radial lines (spokes) through k-space center.
+        center_fraction : float
+            Fully sampled central region (radius fraction of image size).
+        """
+
+        self.shape = shape
+        self.num_spokes = num_spokes
+        self.center_fraction = center_fraction
+
+    def generate(self):
+        H, W = self.shape
+        cy, cx = H // 2, W // 2
+        Y, X = np.ogrid[:H, :W]
+        
+        # radial coordinates (centered)
+        x = X - cx
+        y = Y - cy
+
+        mask = np.zeros((H, W), dtype=np.float32)
+
+        # Angles for evenly spaced spokes
+
+        golden_angle = np.pi / ( (1 + np.sqrt(5)) / 2 )  # ≈ 111.25°
+        angles = np.mod(np.arange(self.num_spokes) * golden_angle, np.pi)
+        #angles = np.linspace(0, np.pi, self.num_spokes, endpoint=False)
+
+        # Create spokes
+        for theta in angles:
+            # parametric line through center
+            r = x * np.cos(theta) + y * np.sin(theta)
+            mask[np.abs(r) < 0.5] = 1  # line thickness ~1 pixel
+
+        # Add fully-sampled low-frequency circle
+        R = np.sqrt(x**2 + y**2)
+        mask[R < (min(H, W) * self.center_fraction / 2)] = 1
+
+        return mask

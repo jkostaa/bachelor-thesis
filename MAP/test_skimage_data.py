@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 # from skimage.transform import rescale, resize
 
 from map_tv_minimize import MAPEstimator
-from masks import SimpleMask, BernoulliMask, CenteredBernoulliMask, VariableDensityMask
+from utilities.masks import SimpleMask, BernoulliMask, CenteredBernoulliMask, VariableDensityMask
 
 # np.set_printoptions(threshold=np.inf)
 
