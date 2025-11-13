@@ -237,7 +237,7 @@ class MAPEstimator:
         tv_term = self.lambda_ * self.huber_tv_2d(x)
         return data_term + tv_term
 
-    def subgradient_descent(self, y, x_init=None, learning_rate=0.1, max_iters=100):
+    def subgradient_descent(self, y, x_init=None, learning_rate=0.1, max_iters=400):
         """
         Minimization function
         """

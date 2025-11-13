@@ -38,7 +38,8 @@ class MMSEEstimatorMALA:
         # x = np.zeros_like(np.fft.ifft2(y).real)
 
         if x_init is None:
-            x = np.real(np.fft.ifft2(y))
+            # x = np.real(np.fft.ifft2(y))
+            x = np.real(self.map_estimator.A_adj(y))
         else:
             x = np.array(x_init, dtype=float)
 

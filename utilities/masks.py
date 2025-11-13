@@ -264,6 +264,7 @@ class PseudoRandomColumnMask:
         Parameters:
         - shape: tuple (h, w)
         - acceleration: int, undersampling factor (e.g., 2, 4, 6 or 8)
+        - lam: float, decay parameter (e.g. 4)
         - seed: random seed for reproducibility
         """
 
