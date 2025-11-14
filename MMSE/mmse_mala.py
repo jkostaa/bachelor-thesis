@@ -34,6 +34,31 @@ class MMSEEstimatorMALA:
         diff = x_to - x_from + self.mala_step_size * grad_from
         return -0.25 / self.mala_step_size * np.sum(diff**2)
 
+    def gradient_check(self, x_test, y, i=10, j=10, eps=1e-6):
+        """
+        Diagnostic finite-difference test: compares analytical and numerical gradients.
+        """
+
+        # --- 1. Analytical gradient ---
+        x0 = np.real(self.map_estimator.A_adj(y)).astype(np.complex128)             # use your typical x_init
+        eps = 1e-6
+        i, j = 10, 10
+
+        # Analytical gradient (data term only)
+        grad_anal = (self.map_estimator.data_fidelity_gradient(x0, y))[i, j]   # complex value
+
+        # Numerical gradient (perturb real part)
+        x_p = x0.copy(); x_p[i, j] += eps
+        x_m = x0.copy(); x_m[i, j] -= eps
+
+        U_data = lambda z: 0.5 / (self.sigma**2) * np.linalg.norm(self.map_estimator.A(z) - y)**2
+        grad_num = (U_data(x_p) - U_data(x_m)) / (2 * eps)   # scalar (real)
+
+        print("grad_anal (complex)   :", grad_anal)
+        print("Re(grad_anal)         :", np.real(grad_anal))
+        print("Im(grad_anal)         :", np.imag(grad_anal))
+        print("grad_num (finite diff):", grad_num)
+
     def mala_sampling(self, y, x_init=None):
         # x = np.zeros_like(np.fft.ifft2(y).real)
 
@@ -90,10 +115,10 @@ class MMSEEstimatorMALA:
         """
         samples = self.mala_sampling(y)
         x_mmse = np.mean(samples, axis=0)
-        x_mmse = np.nan_to_num(x_mmse)  # replaces NaNs and Infs with 0
-        denom = x_mmse.max() - x_mmse.min()
-        if denom > 0:
-            normalized_mmse = (x_mmse - x_mmse.min()) / denom
-        else:
-            normalized_mmse = x_mmse  # fallback if flat
-        return normalized_mmse
+        # x_mmse = np.nan_to_num(x_mmse)  # replaces NaNs and Infs with 0
+        # denom = x_mmse.max() - x_mmse.min()
+        # if denom > 0:
+        #     normalized_mmse = (x_mmse - x_mmse.min()) / denom
+        # else:
+        #     normalized_mmse = x_mmse  # fallback if flat
+        return x_mmse

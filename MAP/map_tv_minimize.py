@@ -57,7 +57,7 @@ class MAPEstimator:
         """
         Compute the adjoint of A
         """
-        return np.fft.ifft2(self.M * k_residual, norm='ortho')  # added .real
+        return np.fft.ifft2(self.M * k_residual, norm='ortho')  
 
     def adjoint_test(self, shape):
         """
@@ -89,12 +89,15 @@ class MAPEstimator:
 
     def data_fidelity_gradient(self, x, y):
         """
+        Gradient of data fidelity term:
         k_residual: Ax - y <-> M * F(x) - y ... error between predicted & measured k-space data, has dimensions of k-space(=residual)
-        Returns the gradient (derived after x) of the data fidelity term (1/2*sigma * ||Ax - y||^2)
+        U_data(x) = 0.5 / sigma**2 * || A(x) - y ||^2
+        grad = A^*(A x - y) / sigma^2
+        Returns a complex-valued array (same shape as x)
         """
 
         residual = self.A(x) - y
-        grad = self.A_adj(residual).real / self.sigma**2
+        grad = self.A_adj(residual) / self.sigma**2 
         return grad
 
     def finite_diff_gradient(self, x):  # we are assuming that x is a 2D image
