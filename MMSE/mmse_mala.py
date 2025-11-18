@@ -26,7 +26,7 @@ class MMSEEstimatorMALA:
         #reg_term = self.lambda_ * np.sum(np.sqrt(self.map_estimator.huber_tv_subgradient(x)**2 + 1e-8))
         # keep reg term simple (sum of abs of TV-subgradient)
 
-        reg_term = self.lambda_ * np.sum(np.abs(self.map_estimator.huber_tv_subgradient(x)))
+        reg_term = self.lambda_ * self.map_estimator.huber_tv_2d(x) # should use self.map_estimator.huber_tv_2d(x) ...
         return data_term + reg_term
 
     def log_q(self, x_from, x_to, grad_from):
@@ -34,7 +34,7 @@ class MMSEEstimatorMALA:
         diff = x_to - x_from + self.mala_step_size * grad_from
         return -0.25 / self.mala_step_size * np.sum(diff**2)
 
-    def gradient_check(self, x_test, y, i=10, j=10, eps=1e-6):
+    def gradient_check(self, x_test, y, i=10, j=10, eps=1e-6): # diagnostic function for data fidelity gradient check
         """
         Diagnostic finite-difference test: compares analytical and numerical gradients.
         """
@@ -59,6 +59,44 @@ class MMSEEstimatorMALA:
         print("Im(grad_anal)         :", np.imag(grad_anal))
         print("grad_num (finite diff):", grad_num)
 
+    def check_tv_grad(self): # diagnostic function for huber TV gradient check
+        np.random.seed(0)
+
+        # Small random test image
+        x = np.random.randn(8, 8)
+
+        # Pick a pixel index
+        i, j = 3, 4
+
+        # Compute analytic gradient
+        grad_anal = self.map_estimator.huber_tv_subgradient(x)[i, j]
+
+        # Compute numerical gradient
+        eps = 1e-5
+        x_plus  = x.copy(); x_plus[i, j]  += eps
+        x_minus = x.copy(); x_minus[i, j] -= eps
+
+        tv_plus  = self.map_estimator.huber_tv_2d(x_plus)
+        tv_minus = self.map_estimator.huber_tv_2d(x_minus)
+
+        grad_num = (tv_plus - tv_minus) / (2 * eps)
+
+        print("Analytical:", grad_anal)
+        print("Numerical :", grad_num)
+        print("Abs err   :", abs(grad_anal - grad_num))
+        print("Rel err   :", abs(grad_anal - grad_num) / (abs(grad_num) + 1e-12))
+
+    def energy_check(self, x, y):
+        data_term = 0.5 / (self.sigma**2) * np.linalg.norm(self.map_estimator.A(x) - y)**2
+        reg_term  = self.lambda_ * self.map_estimator.huber_tv_2d(x)
+        U = self.negative_log_posterior(x, y)   # or energy(x)
+
+        print("data_term:", data_term)
+        print("reg_term: ", reg_term)
+        print("U (energy):", U)
+        print("sum parts:", data_term + reg_term)
+        print("abs diff:", abs(U - (data_term + reg_term)))
+
     def mala_sampling(self, y, x_init=None):
         # x = np.zeros_like(np.fft.ifft2(y).real)
 
@@ -73,8 +111,8 @@ class MMSEEstimatorMALA:
         for i in range(self.burn_in + self.num_samples * self.thin):
             grad = (self.map_estimator.data_fidelity_gradient(x, y)
                     + self.lambda_ * self.map_estimator.huber_tv_subgradient(x))
-
-            #print(grad)
+            
+            #print(grad.dtype)
 
             noise = np.random.randn(*x.shape) * np.sqrt(2.0 * self.mala_step_size)
             x_proposal = x - grad * self.mala_step_size + noise
@@ -96,8 +134,12 @@ class MMSEEstimatorMALA:
             # or: alpha = min(1.0, np.exp(np.clip(log_alpha, a_min=None, a_max=0)))
 
             # Accept/reject
+            accepted = 0
+            total = 0
             if np.random.rand() < alpha:
                 x = x_proposal
+                accepted += 1
+            total += 1
 
             if np.any(np.isnan(x)) or np.any(np.isinf(x)):
                 print("NaN/Inf detected at iteration", i)
@@ -106,7 +148,7 @@ class MMSEEstimatorMALA:
             # Store samples after burn-in with thinning
             if i >= self.burn_in and (i - self.burn_in) % self.thin == 0:
                 samples_kept.append(np.copy(x))
-
+        print("acceptance rate:", accepted / total)
         return samples_kept
     
     def compute_mmse_estimate(self, y, x_init=None):

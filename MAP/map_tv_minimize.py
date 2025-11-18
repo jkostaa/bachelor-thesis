@@ -97,8 +97,8 @@ class MAPEstimator:
         """
 
         residual = self.A(x) - y
-        grad = self.A_adj(residual) / self.sigma**2 
-        return grad
+        grad = np.real(self.A_adj(residual)  / self.sigma**2) # added np.real()
+        return grad #(grad.real) / (self.sigma ** 2)
 
     def finite_diff_gradient(self, x):  # we are assuming that x is a 2D image
         """
@@ -108,23 +108,19 @@ class MAPEstimator:
         Returns the horizontal and vertical gradient
         """
 
-        """
-        #alternative implementation
+        # #alternative implementation
         grad_x = np.zeros_like(x)
         grad_y = np.zeros_like(x)
-        #grad_x[:, :-1] = x[:, 1:] - x[:, :-1]
-        grad_x[:, 1:-1] = (x[:, 2:] - x[:, :-2]) / 2
+        grad_x[:, :-1] = x[:, 1:] - x[:, :-1]
+        #grad_x[:, 1:-1] = (x[:, 2:] - x[:, :-2]) / 2
 
-        #grad_y[:-1, :] = x[1:, :] - x[:-1, :]
-        grad_y[1:-1, :] = (x[2:, :] - x[:-2, :]) / 2
-        """
+        grad_y[:-1, :] = x[1:, :] - x[:-1, :]
+        #grad_y[1:-1, :] = (x[2:, :] - x[:-2, :]) / 2
 
-        grad_x = (
-            np.roll(x, -1, axis=1) - x
-        )  # horizontal, shift columns 1 position to the left and subtract with x
-        grad_y = np.roll(x, -1, axis=0) - x  # vertical
-
-        # grad_x, grad_y = np.gradient(x)
+        # grad_x = (
+        #     np.roll(x, -1, axis=1) - x
+        # )  # horizontal, shift columns 1 position to the left and subtract with x
+        # grad_y = np.roll(x, -1, axis=0) - x  # vertical
 
         return grad_x, grad_y
 
@@ -154,13 +150,13 @@ class MAPEstimator:
         grad_dy = w * dy
         return grad_dx, grad_dy
     
-        abs_dx = np.abs(dx)
-        abs_dy = np.abs(dy)
+        # abs_dx = np.abs(dx)
+        # abs_dy = np.abs(dy)
 
-        grad_dx = np.where(abs_dx >= self.eps, np.sign(dx), dx / self.eps,)
-        grad_dy = np.where(abs_dy >= self.eps, np.sign(dy), dy / self.eps)
+        # grad_dx = np.where(abs_dx >= self.eps, np.sign(dx), dx / self.eps,)
+        # grad_dy = np.where(abs_dy >= self.eps, np.sign(dy), dy / self.eps)
 
-        return grad_dx, grad_dy 
+        # return grad_dx, grad_dy 
 
     def divergence(self, norm_grad_x, norm_grad_y):
         """
@@ -202,7 +198,7 @@ class MAPEstimator:
         # Compute the finite differences
 
         dx, dy = self.finite_diff_gradient(x)
-        t = np.sqrt(dx**2 + dy**2 + 1e-8) # + 1e-8 to avoid division through 0
+        t = np.sqrt(dx**2 + dy**2)
         quad = (t**2) / (2 * self.eps)
         lin = np.abs(t) - (self.eps / 2) # np.abs(t) or just t
         tv = np.where(t <= self.eps, quad, lin)
@@ -231,7 +227,7 @@ class MAPEstimator:
 
         return -self.divergence(grad_dx, grad_dy)
 
-    def compute_loss(self, x, y):
+    def compute_loss(self, x, y): # check maybe if data_term is correct (2* sigma or just sigma)
         '''
         Function to compute the loss (used later in the subgradient descent function
         to plot the loss over iterations)
@@ -240,7 +236,7 @@ class MAPEstimator:
         tv_term = self.lambda_ * self.huber_tv_2d(x)
         return data_term + tv_term
 
-    def subgradient_descent(self, y, x_init=None, learning_rate=0.1, max_iters=400):
+    def subgradient_descent(self, y, x_init=None, learning_rate=0.1, max_iters=300):
         """
         Minimization function
         """
@@ -250,7 +246,7 @@ class MAPEstimator:
         # x = np.zeros_like(np.fft.ifft2(y).real)
 
         if x_init is None:
-            x = np.real(np.fft.ifft2(y))
+            x = np.real(np.fft.ifft2(y)) # or np.abs()?
         else:
             x = np.array(x_init, dtype=float)
 
@@ -262,6 +258,7 @@ class MAPEstimator:
             gradient_tv = self.huber_tv_subgradient(x)
             # print(f"Iteration {i}: grad_y min={grad_y.min():.2e}, max={grad_y.max():.2e}, mean={grad_y.mean():.2e}")
             gradient = gradient_data + self.lambda_ * gradient_tv
+            gradient = gradient.real
 
             grad_norm = np.linalg.norm(gradient)
             self.grad_norm_history.append(grad_norm)
@@ -274,15 +271,15 @@ class MAPEstimator:
             loss = self.compute_loss(x, y)
             self.loss_history.append(loss)
 
-            # if i % 10 == 0:
-            #     print(f"Iter {i}: Loss = {loss:.8f}")
-            #     print(f"Iter {i}: Gradient = {grad_norm:.8f}")
-            #     #print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
-            #     #print("data_term =", np.linalg.norm(self.A(x) - y)**2 / (2*self.sigma**2))
-            #     #print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
-            #     #print("||grad_data|| =", np.linalg.norm(gradient_data))
-            #     #print("||grad_tv|| =", np.linalg.norm(gradient_tv))
-            #     #print("grad min/max:", gradient.min(), gradient.max())
+            if i % 50 == 0:
+                print(f"Iter {i}: Loss = {loss:.8f}")
+                print(f"Iter {i}: Gradient = {grad_norm:.8f}")
+                print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
+                print("data_term =", np.linalg.norm(self.A(x) - y)**2 / (2*self.sigma**2))
+                print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
+                print("||grad_data|| =", np.linalg.norm(gradient_data))
+                print("||grad_tv|| =", np.linalg.norm(gradient_tv))
+                print("grad min/max:", gradient.min(), gradient.max())
 
         return x
 

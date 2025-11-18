@@ -5,19 +5,19 @@ def psnr(x_rec, x_ref, data_range=1.0):
     data_range: 1.0, if image normalized to [0,1]
     
     """
-    x_rec = np.abs(x_rec)
-    x_ref = np.abs(x_ref)
-    max_val = np.max(x_ref)
+    x_rec = np.abs(x_rec).astype(float)
+    x_ref = np.abs(x_ref).astype(float)
+    #max_val = np.max(x_ref)
 
     # Normalize to the same scale
-    x_rec = x_rec / max_val
-    x_ref = x_ref / max_val
+    x_rec = x_rec / x_rec.max()
+    x_ref = x_ref / x_ref.max()
 
     mse = np.mean((x_rec - x_ref) ** 2) # (np.mean((np.abs(x_hat) - np.abs(x)) ** 2))
     if mse == 0:
         return np.inf
 
-    return 10 * np.log10((1.0 ** 2/ mse ))
+    return 10 * np.log10((1 ** 2/ mse ))
 
 def stats(name, x):
     print(f"{name}: dtype={x.dtype}, shape={x.shape}, max={np.max(np.abs(x)):.2e}, "
