@@ -16,7 +16,7 @@ class MMSEEstimatorMALA:
         self.burn_in = burn_in
         self.thin = thin
         self.num_samples = num_samples
-        self.map_estimator = MAPEstimator(M, sigma, lambda_, eps)  # MAP instance for gradient computations
+        self.map_estimator = MAPEstimator(M, sigma, lambda_, eps, learning_rate=0.01, max_iters=300)  # MAP instance for gradient computations
         self.sigma = sigma
         self.lambda_ = lambda_
 

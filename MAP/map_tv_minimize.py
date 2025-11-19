@@ -30,11 +30,13 @@ class MAPEstimator:
 
     """
 
-    def __init__(self, M, sigma, lambda_, eps):
+    def __init__(self, M, sigma, lambda_, eps, learning_rate, max_iters):
         self.M = M
         self.lambda_ = lambda_
         self.sigma = sigma
         self.eps = eps
+        self.learning_rate = learning_rate
+        self.max_iters = max_iters
         self.loss_history = []
 
     # Forward and adjoint operators
@@ -97,8 +99,8 @@ class MAPEstimator:
         """
 
         residual = self.A(x) - y
-        grad = np.real(self.A_adj(residual)  / self.sigma**2) # added np.real()
-        return grad #(grad.real) / (self.sigma ** 2)
+        grad = self.A_adj(residual)  / self.sigma**2 
+        return np.real(grad) #(grad.real) 
 
     def finite_diff_gradient(self, x):  # we are assuming that x is a 2D image
         """
@@ -109,20 +111,27 @@ class MAPEstimator:
         """
 
         # #alternative implementation
-        grad_x = np.zeros_like(x)
-        grad_y = np.zeros_like(x)
-        grad_x[:, :-1] = x[:, 1:] - x[:, :-1]
-        #grad_x[:, 1:-1] = (x[:, 2:] - x[:, :-2]) / 2
+        gx = np.zeros_like(x)
+        gy = np.zeros_like(x)
 
-        grad_y[:-1, :] = x[1:, :] - x[:-1, :]
+        # gx[:, :-1] = x[:, 1:] - x[:, :-1]
+        # gx[:, -1]  = -x[:, -1] 
+        # #grad_x[:, 1:-1] = (x[:, 2:] - x[:, :-2]) / 2
+
+        # gy[:-1, :] = x[1:, :] - x[:-1, :]
+        # gy[-1, :]  = -x[-1, :]
         #grad_y[1:-1, :] = (x[2:, :] - x[:-2, :]) / 2
 
+
+        gx[:, :-1] = x[:, 1:] - x[:, :-1]   # horizontal (right - center)
+        gy[:-1, :] = x[1:, :] - x[:-1, :]   # vertical (bottom - center)
+        
         # grad_x = (
         #     np.roll(x, -1, axis=1) - x
         # )  # horizontal, shift columns 1 position to the left and subtract with x
         # grad_y = np.roll(x, -1, axis=0) - x  # vertical
 
-        return grad_x, grad_y
+        return gx, gy
 
     '''
     def gradient_magnitude(self, x):
@@ -158,16 +167,29 @@ class MAPEstimator:
 
         # return grad_dx, grad_dy 
 
-    def divergence(self, norm_grad_x, norm_grad_y):
+    def divergence(self, px, py):
         """
         Computes the divergence of a vector field
         Input: 2 arrays (vector field)
         Output: 2D array (scalar)
         """
 
-        div_x = norm_grad_x - np.roll(norm_grad_x, 1, axis=1)
-        div_y = norm_grad_y - np.roll(norm_grad_y, 1, axis=0)
-        return div_x + div_y
+        # div_x = norm_grad_x - np.roll(norm_grad_x, 1, axis=1)
+        # div_y = norm_grad_y - np.roll(norm_grad_y, 1, axis=0)
+
+        div = np.zeros_like(px)
+
+        # adjoint of horizontal forward diff
+        div[:, 0]      -= px[:, 0]
+        div[:, 1:-1]  += px[:, :-2] - px[:, 1:-1]
+        div[:, -1]    += px[:, -2]
+
+        # adjoint of vertical forward diff
+        div[0, :]     -= py[0, :]
+        div[1:-1, :]  += py[:-2, :] - py[1:-1, :]
+        div[-1, :]    += py[-2, :]
+
+        return -div
 
     def huber_tv_2d(self, x):
         """
@@ -195,9 +217,9 @@ class MAPEstimator:
                 abs_t >= eps, lin, quad
             )  # condition if |t| >= eps; return lin, else return quad
         '''
-        # Compute the finite differences
 
         dx, dy = self.finite_diff_gradient(x)
+
         t = np.sqrt(dx**2 + dy**2)
         quad = (t**2) / (2 * self.eps)
         lin = np.abs(t) - (self.eps / 2) # np.abs(t) or just t
@@ -236,7 +258,7 @@ class MAPEstimator:
         tv_term = self.lambda_ * self.huber_tv_2d(x)
         return data_term + tv_term
 
-    def subgradient_descent(self, y, x_init=None, learning_rate=0.1, max_iters=300):
+    def subgradient_descent(self, y, x_init=None):
         """
         Minimization function
         """
@@ -251,7 +273,7 @@ class MAPEstimator:
             x = np.array(x_init, dtype=float)
 
 
-        for i in range(max_iters):
+        for i in range(self.max_iters):
             # a = self.A(x) # for print check
 
             gradient_data = self.data_fidelity_gradient(x, y)
@@ -263,7 +285,7 @@ class MAPEstimator:
             grad_norm = np.linalg.norm(gradient)
             self.grad_norm_history.append(grad_norm)
 
-            x -= learning_rate * gradient
+            x -= self.learning_rate * gradient
 
             # print(f"Iteration {i}, update norm: {np.linalg.norm(self.learning_rate * gradient)}")
 

@@ -15,7 +15,7 @@ class MMSEEstimatorULA:
         self.burn_in = burn_in
         self.thin = thin
         self.num_samples = num_samples
-        self.map_estimator = MAPEstimator(M, sigma, lambda_, eps) # MAP instance for gradient computations
+        self.map_estimator = MAPEstimator(M, sigma, lambda_, eps, learning_rate=0.01, max_iters=300) # MAP instance for gradient computations
 
     def ula_sampling(self, y, x_init=None):
         #x = np.zeros_like(np.fft.ifft2(y).real)

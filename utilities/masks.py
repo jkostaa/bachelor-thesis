@@ -26,7 +26,7 @@ class SimpleMask: # not relevant for thesis
         # masked_matrix = np.copy(x)
 
         for i in range(0, cols, self.step):
-            M[:, i] = 1
+            M[:, i] = 1.0
 
         return M
 
@@ -46,7 +46,7 @@ class SimpleMask: # not relevant for thesis
         # masked_matrix = np.copy(x)
 
         for j in range(0, rows, self.step):
-            M[j, :] = 1 # use value 0 for masking
+            M[j, :] = 1.0 # use value 0 for masking
 
         return M
 
@@ -79,12 +79,12 @@ class SimpleMask2D: # not relevant for thesis
         # Sample rows
         if self.row_step is not None:
             for i in range(0, rows, self.row_step):
-                M[i, :] = 1
+                M[i, :] = 1.0
 
         # Sample columns
         if self.col_step is not None:
             for j in range(0, cols, self.col_step):
-                M[:, j] = 1
+                M[:, j] = 1.0
 
         return M
 
@@ -242,7 +242,7 @@ class UniformColumnMask:
         # Fully sampled center region
         center_start = width // 2 - center_cols // 2
         center_end = center_start + center_cols
-        mask[:, center_start:center_end] = 1
+        mask[:, center_start:center_end] = 1.0
 
         # Uniformly spaced outer columns
         step = self.acceleration  # every R-th column
@@ -251,7 +251,7 @@ class UniformColumnMask:
 
         for col in range(0, width, step):
             if col < center_start or col >= center_end:
-                mask[:, col] = 1
+                mask[:, col] = 1.0
 
         return mask
 
@@ -300,7 +300,7 @@ class PseudoRandomColumnMask:
         # fill in the center region (centred horizontally)
         center_start = width // 2 - center_cols // 2
         center_end = center_start + center_cols
-        mask[:, center_start:center_end] = 1
+        mask[:, center_start:center_end] = 1.0
 
         total_sampled_cols = int(round(width / self.acceleration))
 
@@ -321,7 +321,7 @@ class PseudoRandomColumnMask:
 
         candidate_cols = np.arange(width)
         random_cols = np.random.choice(candidate_cols, size=num_random_cols, replace=False, p=probs)
-        mask[:, random_cols] = 1
+        mask[:, random_cols] = 1.0
         
         return mask
     
@@ -370,10 +370,10 @@ class RadialMask:
         for theta in angles:
             # parametric line through center
             r = x * np.cos(theta) + y * np.sin(theta)
-            mask[np.abs(r) < 0.5] = 1  # line thickness ~1 pixel
+            mask[np.abs(r) < 0.5] = 1.0  # line thickness ~1 pixel
 
         # Add fully-sampled low-frequency circle
         R = np.sqrt(x**2 + y**2)
-        mask[R < (min(H, W) * self.center_fraction / 2)] = 1
+        mask[R < (min(H, W) * self.center_fraction / 2)] = 1.0
 
         return mask
