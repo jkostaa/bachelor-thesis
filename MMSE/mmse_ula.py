@@ -7,77 +7,179 @@ project_root = os.path.abspath(os.path.join(os.getcwd(), r"C:\Users\kostanjsek\b
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from MAP.map_tv_minimize import MAPEstimator
-
 class MMSEEstimatorULA:
     def __init__(self, M, sigma, lambda_, eps, ula_step_size, burn_in, thin, num_samples):
+        self.M = M
+        self.sigma = sigma
+        self.lambda_ = lambda_
+        self.eps = eps
         self.ula_step_size = ula_step_size
         self.burn_in = burn_in
         self.thin = thin
         self.num_samples = num_samples
-        self.map_estimator = MAPEstimator(M, sigma, lambda_, eps, learning_rate=0.01, max_iters=300) # MAP instance for gradient computations
+
+    def A(self, x):
+        """
+        Defined as: A = M * F
+        Compute the composition of 2D discrete Fourier Transform + apply mask
+        Returns a (complex) ndarray type
+        """
+        return self.M * np.fft.fft2(x, norm='ortho') 
+
+    def A_adj(self, k_residual):
+        """
+        Compute the adjoint of A
+        """
+        return np.fft.ifft2(self.M * k_residual, norm='ortho')  
+
+    # Gradients and TV
+
+    def data_fidelity_gradient(self, x, y):
+        """
+        Gradient of data fidelity term:
+        k_residual: Ax - y <-> M * F(x) - y ... error between predicted & measured k-space data, has dimensions of k-space(=residual)
+        U_data(x) = 0.5 / sigma**2 * || A(x) - y ||^2
+        grad = A^*(A x - y) / sigma^2
+        Returns a complex-valued array (same shape as x)
+        """
+
+        residual = self.A(x) - y
+        grad = self.A_adj(residual)  / self.sigma**2 
+        return np.real(grad) #(grad.real) 
+
+    def finite_diff_gradient(self, x):  # we are assuming that x is a 2D image
+        """
+        Computes the forward finite differences
+        Input: 2D array
+        Output: 2 arrays
+        Returns the horizontal and vertical gradient
+        """
+
+        gx = np.zeros_like(x)
+        gy = np.zeros_like(x)
+
+        gx[:, :-1] = x[:, 1:] - x[:, :-1]   # horizontal (right - center)
+        gy[:-1, :] = x[1:, :] - x[:-1, :]   # vertical (bottom - center)
+
+        return gx, gy
+
+ 
+    def huber_penalty_function_grad(self, dx, dy):  # =huber weights
+        """
+        Computes the derivative of the Huber penalty function w.r.t. dx, dy.
+        """
+        t = np.sqrt(dx**2 + dy**2)
+        w = np.where(t <= self.eps, 1.0 / self.eps, 1.0 / (t + 1e-12))
+        grad_dx = w * dx
+        grad_dy = w * dy
+        return grad_dx, grad_dy
+    
+    def divergence(self, px, py):
+        """
+        Computes the divergence of a vector field
+        Input: 2 arrays (vector field)
+        Output: 2D array (scalar)
+        """
+
+        div = np.zeros_like(px)
+
+        # adjoint of horizontal forward diff
+        div[:, 0]      -= px[:, 0]
+        div[:, 1:-1]  += px[:, :-2] - px[:, 1:-1]
+        div[:, -1]    += px[:, -2]
+
+        # adjoint of vertical forward diff
+        div[0, :]     -= py[0, :]
+        div[1:-1, :]  += py[:-2, :] - py[1:-1, :]
+        div[-1, :]    += py[-2, :]
+
+        return div
+
+    def huber_tv_2d(self, x):
+        """
+        A function that computes the Huber total variation of a 2D array (resembling a picture made up of n x m pixels)
+
+        Parameters:
+        x: ndarray of shape (n,m) - the input image -> approximated x
+        eps: float, threshold value (threshold between quadratic and linear region)
+        dx: horizontal differences (n, m-1)
+        dy: vertical differences (n-1, m)
+        """
+
+        dx, dy = self.finite_diff_gradient(x)
+
+        t = np.sqrt(dx**2 + dy**2)
+        quad = (t**2) / (2 * self.eps)
+        lin = np.abs(t) - (self.eps / 2) # np.abs(t) or just t
+        tv = np.where(t <= self.eps, quad, lin)
+
+        return tv.sum()
+
+
+    def huber_tv_subgradient(self, x):
+        """
+        Computes the subgradient of TV
+        Return: subgradient of TV
+        There is a divergence used at the end -> divergence maps back to scalar - same shape as x (image)
+        """
+        dx, dy = self.finite_diff_gradient(x)
+        grad_dx, grad_dy = self.huber_penalty_function_grad(dx, dy)
+
+        return -self.divergence(grad_dx, grad_dy)
+
+    def compute_loss(self, x, y): # check maybe if data_term is correct (2* sigma or just sigma)
+        '''
+        Function to compute the loss (used later in the subgradient descent function
+        to plot the loss over iterations)
+        '''
+        data_term = np.linalg.norm(self.A(x) - y) ** 2 / (2 * self.sigma**2)
+        tv_term = self.lambda_ * self.huber_tv_2d(x)
+        return data_term + tv_term
 
     def ula_sampling(self, y, x_init=None):
         #x = np.zeros_like(np.fft.ifft2(y).real)
 
         if x_init is None:
-            # x = np.real(np.fft.ifft2(y))
-            x = np.real(self.map_estimator.A_adj(y))
+            x = np.real(np.fft.ifft2(y)).astype(np.float64)
+            # x = np.real(self.A_adj(y))
         else:
-            x = np.array(x_init, dtype=float)
+            x = np.array(x_init, dtype=np.float64)
 
         energies = []
         samples_kept = []
         n_iters = int(self.burn_in + max(0, int(self.num_samples)) * max(1, int(self.thin)))
+        
         for i in range(n_iters):
-        #for i in range(self.burn_in + self.num_samples * self.thin):
-        
-        
-
-            '''
-            #E_before = self.map_estimator.compute_loss(x, y)
-            #g_data = self.map_estimator.data_fidelity_gradient(x, y)
-            #g_tv = self.map_estimator.huber_tv_subgradient(x)
-
-            #dx, dy = self.map_estimator.finite_diff_gradient(x)   # use your chosen diff (Neumann/periodic)
-            #t = np.sqrt(dx*dx + dy*dy)
-            #eps_safe = max(self.map_estimator.eps, 1e-12)
-            #w = np.where(t <= eps_safe, 1.0/eps_safe, 1.0/(t + 1e-12))
-            #px = w * dx
-            #py = w * dy
-            #div = -self.map_estimator.divergence(px, py)
-
             
-            # if i == 0 or i % 50 == 0:
-            #     print(f"ITERATION {i} FOR TESTING THE TV COMPONENTS")
-            #     print("dx norm, dy norm:", np.linalg.norm(dx), np.linalg.norm(dy))
-            #     print("t min/median/mean/max:", t.min(), np.median(t), t.mean(), t.max())
-
-            #     print("w min/median/mean/max:", w.min(), np.median(w), w.mean(), w.max())
-
-            #     print("px norm, py norm:", np.linalg.norm(px), np.linalg.norm(py))
-
-            #     print("div norm (this is g_tv):", np.linalg.norm(div))
-            '''
-
-
-            grad = (self.map_estimator.data_fidelity_gradient(x, y) + self.map_estimator.lambda_ * self.map_estimator.huber_tv_subgradient(x))
+            # compute gradient of U = data_term + lambda * TV
+            grad = (self.data_fidelity_gradient(x, y) + self.lambda_ * self.huber_tv_subgradient(x))
             
             gnorm = np.linalg.norm(grad)
-            if i % 25 == 0:
-                print(f"ULA iter {i:4d}, grad_norm={gnorm:.3e}, sample_mean={x.mean():.3e}, sample_std={x.std():.3e}")
+            # if gnorm > 1e2: # 1e2 = clip
+            #     grad = grad * (1e2 / (gnorm + 1e-16))
+            #     gnorm = 1e2
+            if i % 50 == 0:
+                print(f"ULA iter {i:4d}, min={grad.min():.3e}, max={grad.max():.3e} grad_norm={gnorm:.3e}, sample_mean={x.mean():.3e}, sample_std={x.std():.3e}")
 
-            # if i == 0 or i % 25 == 0:
-            #     print (f"ITERATION: {i}")
-            #     print("E_before:", E_before)
-            #     print("||grad||, ||g_data||, ||g_tv||:", np.linalg.norm(grad), np.linalg.norm(g_data), np.linalg.norm(g_tv))
-            #     print("x min/max:", x.min(), x.max(), "mean:", x.mean())
 
             noise = np.random.randn(*x.shape) * np.sqrt(2.0 * self.ula_step_size)
             #drift = self.ula_step_size * grad
 
-            x = x - grad * self.ula_step_size + noise # ULA update: x_{t+1} = x_t - step * ∇U(x_t) + sqrt(2*step)*N(0, I)*
+            # x_prev = x.copy()
+            x = x - grad * self.ula_step_size + noise  # ULA update: x_{t+1} = x_t - step * ∇U(x_t) + sqrt(2*step)*N(0, I)*
+            
 
+            # diagnostic
+
+            # try:
+            #     U_prev = float(self.compute_loss(x_prev, y))
+            #     U_now  = float(self.compute_loss(x, y))
+            # except Exception as e:
+            #     print("Energy computation failed:", e)
+            #     U_prev, U_now = np.inf, np.inf
+
+            # if i % 10 == 0:
+            #     print(f"iter {i:4d}  U_prev={U_prev:.4e}  U_now={U_now:.4e}  dU={U_now-U_prev:.4e}  gnorm={np.linalg.norm(grad):.3e} drift={np.linalg.norm(self.ula_step_size * grad):.3e} noise={np.linalg.norm(noise):.3e}")
 
             if np.any(np.isnan(x)) or np.any(np.isinf(x)):
                 print("NaN/Inf detected at iteration", i)
@@ -87,7 +189,7 @@ class MMSEEstimatorULA:
             #     print("drift_norm:", np.linalg.norm(drift), "noise_norm:", np.linalg.norm(noise),
             #     "ratio noise/drift:", np.linalg.norm(noise)/(np.linalg.norm(drift)+1e-16))
 
-            energy = self.map_estimator.compute_loss(x, y) # energy = negative log posterior (tracked per sample)
+            energy = float(self.compute_loss(x, y)) # energy = negative log posterior (tracked per sample)
             energies.append(energy)
 
             if i >= self.burn_in and ((i - self.burn_in) % self.thin == 0):
@@ -97,27 +199,13 @@ class MMSEEstimatorULA:
             print("Warning: no samples kept (increase num_samples or decrease burn_in). returning last state as single sample.")
             samples_kept = [np.copy(x)]
 
-        # if len(samples_kept) == 0:
-        #     mmse_estimate = x
-        # else:
-        #     mmse_estimate = np.mean(np.stack(samples_kept, axis=0), axis=0)
-
-
-            # if i == 0 or i % 10 == 0:     
-            #     plt.figure(figsize=(10,4))
-            #     plt.subplot(1,3,1); plt.imshow(dx, cmap='RdBu'); plt.title('dx'); plt.colorbar()
-            #     plt.subplot(1,3,2); plt.imshow(dy, cmap='RdBu'); plt.title('dy'); plt.colorbar()
-            #     plt.subplot(1,3,3); plt.imshow(div, cmap='RdBu'); plt.title('g_tv (div)'); plt.colorbar()
-            #     plt.show()
-
         return samples_kept, energies
     
-    def compute_mmse_estimate(self, y, x_init=None):
+    def compute_mmse_estimate(self, samples):
         """
         Compute MMSE estimate = mean over ULA posterior samples.
         """
-        samples, energies = self.ula_sampling(y)
-        print(len(samples))
+        
         try:
             arr = np.stack(samples, axis=0)   # shape (N, H, W)
         except Exception as e:
@@ -141,6 +229,15 @@ class MMSEEstimatorULA:
         variance_map = np.var(samples, axis=0)
         return variance_map
 
+
+    # def autocorr(self, x): # diagnsotic
+    #     # If autocorrelation stays >0.9 → not moving → step too small
+    #     # f oscillatory → step too large
+    #     # If decays smoothly → good
+    #     x = x - x.mean()
+    #     corr = np.correlate(x, x, mode='full')
+    #     corr = corr[corr.size//2:]
+    #     return corr / corr[0]
         '''
     def plot_variance_map(self, variance_map, cmap="magma", vmax=None):
         """

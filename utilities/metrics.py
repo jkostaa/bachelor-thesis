@@ -33,6 +33,7 @@ def psnr(x_rec, x_ref, data_range=None):
     data_range: 1.0, if image normalized to [0,1]
     
     """
+
     if data_range is None:
         dmin, dmax = dtype_range[x_ref.dtype.type]
         true_min, true_max = np.min(x_ref), np.max(x_ref)
@@ -81,5 +82,5 @@ def nmse(x_rec, x_ref):
 
     return mean_squared_error(x_ref, x_rec) * x_ref.size / np.sum(x_ref**2)
 
-def ssim(x_ref, x_rec, *, win_size=None, gradient=False, data_range=None, channel_axis=None, gaussian_weights=False, full=False):
-    return ski_ssim(x_ref, x_rec,data_range=1.0)
+def ssim(x_rec, x_ref, *, win_size=None, gradient=False, data_range=None, channel_axis=None, gaussian_weights=False, full=False):
+    return ski_ssim(x_rec, x_ref,data_range=1.0)

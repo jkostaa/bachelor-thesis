@@ -293,15 +293,15 @@ class MAPEstimator:
             loss = self.compute_loss(x, y)
             self.loss_history.append(loss)
 
-            if i % 50 == 0:
-                print(f"Iter {i}: Loss = {loss:.8f}")
-                print(f"Iter {i}: Gradient = {grad_norm:.8f}")
-                print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
-                print("data_term =", np.linalg.norm(self.A(x) - y)**2 / (2*self.sigma**2))
-                print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
-                print("||grad_data|| =", np.linalg.norm(gradient_data))
-                print("||grad_tv|| =", np.linalg.norm(gradient_tv))
-                print("grad min/max:", gradient.min(), gradient.max())
+            # if i % 50 == 0:
+            #     print(f"Iter {i}: Loss = {loss:.8f}")
+            #     print(f"Iter {i}: Gradient = {grad_norm:.8f}")
+            #     print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
+            #     print("data_term =", np.linalg.norm(self.A(x) - y)**2 / (2*self.sigma**2))
+            #     print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
+            #     print("||grad_data|| =", np.linalg.norm(gradient_data))
+            #     print("||grad_tv|| =", np.linalg.norm(gradient_tv))
+            #     print("grad min/max:", gradient.min(), gradient.max())
 
         return x
 
