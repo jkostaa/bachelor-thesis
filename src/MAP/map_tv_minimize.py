@@ -1,18 +1,6 @@
 import numpy as np
 
-# from scipy.ndimage import sobel
-# from skimage.filters import scharr_h, scharr_v
-
-# from scipy.optimize import minimize
-
-import os
-import sys
-project_root = os.path.abspath(os.path.join(os.getcwd(), r"C:\Users\kostanjsek\bachelor_project"))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
 # Implementation of the class
-
 
 class MAPEstimator:
     """

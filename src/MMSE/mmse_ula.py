@@ -1,11 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
-
-import os
-import sys
-project_root = os.path.abspath(os.path.join(os.getcwd(), r"C:\Users\kostanjsek\bachelor_project"))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
 class MMSEEstimatorULA:
     def __init__(self, M, sigma, lambda_, eps, ula_step_size, burn_in, thin, num_samples):
