@@ -251,6 +251,7 @@ class MAPEstimator:
         Minimization function
         """
     
+        self.loss_history = []
         self.grad_norm_history = []
         
         # x = np.zeros_like(np.fft.ifft2(y).real)

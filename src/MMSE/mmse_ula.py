@@ -86,7 +86,7 @@ class MMSEEstimatorULA:
         div[1:-1, :]  += py[:-2, :] - py[1:-1, :]
         div[-1, :]    += py[-2, :]
 
-        return div
+        return -div
 
     def huber_tv_2d(self, x):
         """
@@ -207,6 +207,8 @@ class MMSEEstimatorULA:
             # Fallback: use last sample as single-item array
             arr = np.expand_dims(np.array(samples[-1]), axis=0)
 
+        return np.mean(arr, axis=0) 
+    
         x_mmse = np.mean(arr, axis=0)
         x_mmse = np.nan_to_num(x_mmse)
         denom = x_mmse.max() - x_mmse.min()
