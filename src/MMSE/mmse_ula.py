@@ -133,7 +133,7 @@ class MMSEEstimatorULA:
         #x = np.zeros_like(np.fft.ifft2(y).real)
 
         if x_init is None:
-            x = np.real(np.fft.ifft2(y)).astype(np.float64)
+            x = np.real(np.fft.ifft2(y, norm='ortho')).astype(np.float64)
             # x = np.real(self.A_adj(y))
         else:
             x = np.array(x_init, dtype=np.float64)

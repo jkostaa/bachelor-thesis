@@ -87,7 +87,7 @@ class MAPEstimator:
         """
 
         residual = self.A(x) - y
-        grad = self.A_adj(residual)  / self.sigma**2 
+        grad = self.A_adj(residual)  #/ self.sigma**2 
         return np.real(grad) #(grad.real) 
 
     def finite_diff_gradient(self, x):  # we are assuming that x is a 2D image
@@ -242,7 +242,7 @@ class MAPEstimator:
         Function to compute the loss (used later in the subgradient descent function
         to plot the loss over iterations)
         '''
-        data_term = np.linalg.norm(self.A(x) - y) ** 2 / (2 * self.sigma**2)
+        data_term = 0.5 * np.linalg.norm(self.A(x) - y) ** 2 #/ (2 * self.sigma**2)
         tv_term = self.lambda_ * self.huber_tv_2d(x)
         return data_term + tv_term
 
@@ -257,7 +257,7 @@ class MAPEstimator:
         # x = np.zeros_like(np.fft.ifft2(y).real)
 
         if x_init is None:
-            x = np.real(np.fft.ifft2(y)) # or np.abs()?
+            x = np.real(np.fft.ifft2(y, norm='ortho')) # or np.abs()?
         else:
             x = np.array(x_init, dtype=float)
 
@@ -272,6 +272,11 @@ class MAPEstimator:
             gradient = gradient.real
 
             grad_norm = np.linalg.norm(gradient)
+            # gradient clipping
+            # max_grad_norm = 100.0  # tune this
+            # if grad_norm > max_grad_norm:
+            #     gradient = gradient * (max_grad_norm / grad_norm)
+
             self.grad_norm_history.append(grad_norm)
 
             x -= self.learning_rate * gradient
