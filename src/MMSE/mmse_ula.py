@@ -37,7 +37,7 @@ class MMSEEstimatorULA:
         """
 
         residual = self.A(x) - y
-        grad = self.A_adj(residual)  / self.sigma**2 
+        grad = self.A_adj(residual) / self.sigma**2 
         return np.real(grad) #(grad.real) 
 
     def finite_diff_gradient(self, x):  # we are assuming that x is a 2D image
@@ -125,16 +125,21 @@ class MMSEEstimatorULA:
         Function to compute the loss (used later in the subgradient descent function
         to plot the loss over iterations)
         '''
-        data_term = np.linalg.norm(self.A(x) - y) ** 2 / (2 * self.sigma**2)
+        data_term = 0.5 * np.linalg.norm(self.A(x) - y) ** 2 / self.sigma**2
         tv_term = self.lambda_ * self.huber_tv_2d(x)
         return data_term + tv_term
 
-    def ula_sampling(self, y, x_init=None):
-        #x = np.zeros_like(np.fft.ifft2(y).real)
-
+    def ula_sampling(self, y, x_init=None, grad_clip=None, verbose=True):
+        """
+        ULA sampling with optional gradient clipping for stability.
+        
+        Parameters:
+        -----------
+        grad_clip : float or None
+            Clip gradient norm - helps with num. stability when gradients become very large. Recommended: 100-500 depending on problem scale.
+        """
         if x_init is None:
             x = np.real(np.fft.ifft2(y, norm='ortho')).astype(np.float64)
-            # x = np.real(self.A_adj(y))
         else:
             x = np.array(x_init, dtype=np.float64)
 
@@ -147,49 +152,40 @@ class MMSEEstimatorULA:
             # compute gradient of U = data_term + lambda * TV
             grad = (self.data_fidelity_gradient(x, y) + self.lambda_ * self.huber_tv_subgradient(x))
             
-            gnorm = np.linalg.norm(grad)
-            # if gnorm > 1e2: # 1e2 = clip
-            #     grad = grad * (1e2 / (gnorm + 1e-16))
-            #     gnorm = 1e2
-            if i % 50 == 0:
-                print(f"ULA iter {i:4d}, min={grad.min():.3e}, max={grad.max():.3e} grad_norm={gnorm:.3e}, sample_mean={x.mean():.3e}, sample_std={x.std():.3e}")
-
+            grad_norm = np.linalg.norm(grad)
+            
+            # Optional gradient clipping for stability
+            if grad_clip is not None and grad_norm > grad_clip:
+                grad = grad * (grad_clip / (grad_norm + 1e-16))
+                grad_norm = grad_clip
 
             noise = np.random.randn(*x.shape) * np.sqrt(2.0 * self.ula_step_size)
-            #drift = self.ula_step_size * grad
-
-            # x_prev = x.copy()
-            x = x - grad * self.ula_step_size + noise  # ULA update: x_{t+1} = x_t - step * ∇U(x_t) + sqrt(2*step)*N(0, I)*
+            x = x - grad * self.ula_step_size + noise  # ULA update: x_{t+1} = x_t - step * ∇U(x_t) + sqrt(2*step)*N(0, I)
             
-
-            # diagnostic
-
-            # try:
-            #     U_prev = float(self.compute_loss(x_prev, y))
-            #     U_now  = float(self.compute_loss(x, y))
-            # except Exception as e:
-            #     print("Energy computation failed:", e)
-            #     U_prev, U_now = np.inf, np.inf
-
-            # if i % 10 == 0:
-            #     print(f"iter {i:4d}  U_prev={U_prev:.4e}  U_now={U_now:.4e}  dU={U_now-U_prev:.4e}  gnorm={np.linalg.norm(grad):.3e} drift={np.linalg.norm(self.ula_step_size * grad):.3e} noise={np.linalg.norm(noise):.3e}")
-
+            # Prevent NaN/Inf
             if np.any(np.isnan(x)) or np.any(np.isinf(x)):
-                print("NaN/Inf detected at iteration", i)
+                print(f"NaN/Inf detected at iteration {i}, stopping early")
+                if len(samples_kept) == 0:
+                    samples_kept = [np.copy(x)]
                 break
 
-            # if i == 0 or i % 25 == 0:            
-            #     print("drift_norm:", np.linalg.norm(drift), "noise_norm:", np.linalg.norm(noise),
-            #     "ratio noise/drift:", np.linalg.norm(noise)/(np.linalg.norm(drift)+1e-16))
+            loss = self.compute_loss(x, y)
 
-            energy = float(self.compute_loss(x, y)) # energy = negative log posterior (tracked per sample)
+            if verbose and i % 200 == 0:
+                print(f"Iter {i}: Loss = {loss:.4f}")
+                print(f"Iter {i}: Gradient norm = {grad_norm:.4e}")
+                print(f"  data_term = {0.5 * np.linalg.norm(self.A(x) - y)**2 / self.sigma**2:.4e}")
+                print(f"  tv_term = {self.lambda_ * self.huber_tv_2d(x):.4e}")
+
+
+            energy = float(self.compute_loss(x, y))
             energies.append(energy)
 
             if i >= self.burn_in and ((i - self.burn_in) % self.thin == 0):
                 samples_kept.append(np.copy(x))
             
         if len(samples_kept) == 0:
-            print("Warning: no samples kept (increase num_samples or decrease burn_in). returning last state as single sample.")
+            print("Warning: no samples kept (increase num_samples or decrease burn_in). Returning last state as single sample.")
             samples_kept = [np.copy(x)]
 
         return samples_kept, energies
@@ -209,14 +205,14 @@ class MMSEEstimatorULA:
 
         return np.mean(arr, axis=0) 
     
-        x_mmse = np.mean(arr, axis=0)
-        x_mmse = np.nan_to_num(x_mmse)
-        denom = x_mmse.max() - x_mmse.min()
-        if denom > 0:
-            normalized_mmse = (x_mmse - x_mmse.min()) / denom
-        else:
-            normalized_mmse = x_mmse
-        return normalized_mmse
+        # x_mmse = np.mean(arr, axis=0)
+        # x_mmse = np.nan_to_num(x_mmse)
+        # denom = x_mmse.max() - x_mmse.min()
+        # if denom > 0:
+        #     normalized_mmse = (x_mmse - x_mmse.min()) / denom
+        # else:
+        #     normalized_mmse = x_mmse
+        # return normalized_mmse
     
     def compute_variance_map(self, y, x_init=None):
         """Compute pixelwise variance map from posterior samples."""
