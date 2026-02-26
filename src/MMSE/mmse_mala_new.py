@@ -3,17 +3,28 @@ import numpy as np
 np.random.seed(42) # for reproducibility
 
 class MMSEEstimatorMALA:
-    def __init__(self, M, sigma, lambda_, eps, mala_step_size, burn_in, thin, num_samples):
+    def __init__(self, M, sigma, lambda_, eps, L_init, burn_in, thin, num_samples, beta=1.0):
+        """
+        Parameters
+        ----------
+        L_init : float
+            Initial inverse step size.  The step size is eta = 1/L, so a
+            larger L means smaller, more cautious steps.
+        beta   : float in (0, 1]
+            Temperature / noise scale.  beta < 1 tempers the posterior,
+            reducing the effective noise magnitude and making the chain mix
+            more easily in high-dimensional problems.  beta = 1 (default)
+            recovers the exact, un-tempered posterior.
+        """
         self.M = M
         self.sigma = sigma
         self.lambda_ = lambda_
         self.eps = eps
-        self.mala_step_size = mala_step_size
+        self.L_init = float(L_init)
         self.burn_in = burn_in
         self.thin = thin
         self.num_samples = num_samples
-        self.sigma = sigma
-        self.lambda_ = lambda_
+        self.beta = float(beta)
 
     def A(self, x):
         """
@@ -142,10 +153,20 @@ class MMSEEstimatorMALA:
         reg_term = self.lambda_ * self.huber_tv_2d(x) # should use self.huber_tv_2d(x) ...
         return data_term + reg_term
 
-    def log_q(self, x_from, x_to, grad_from, step):
-        # log of Gaussian proposal density: N(x_from - step*grad_from, 2*step*I)
-        diff = x_to - x_from + 0.5 * step * grad_from
-        return -0.5 / step * np.sum(diff**2)
+    def log_q(self, x_from, x_to, grad_from, L):
+        """
+        Log of the Langevin proposal density (un-normalised constant dropped).
+
+        Proposal: x_to ~ N( x_from - g/L,  (2/L)*I )
+          => mean  = x_from - grad_from / L
+          => var   = 2/L  (per coordinate)
+          => log q = -L/4 * ||x_to - x_from + grad_from/L||^2
+
+        This matches the reference implementation's coefficient L/4
+        and is consistent with the proposal in mala_sampling below.
+        """
+        diff = x_to - x_from + grad_from / L
+        return -L / 4.0 * np.sum(diff**2)
 
     # def gradient_check(self, x_test, y, i=10, j=10, eps=1e-6): # diagnostic function for data fidelity gradient check
     #     """
@@ -210,212 +231,175 @@ class MMSEEstimatorMALA:
     #     print("sum parts:", data_term + reg_term)
     #     print("abs diff:", abs(U - (data_term + reg_term)))
 
-    def mala_sampling(self, y, x_init=None, debug=False, clip_grad=None):
+    def _mala_step(self, x, U_x, g_x, L, y):
         """
-        Standard MALA:
-          proposal: x' = x - 0.5 * eta * gradU(x) + sqrt(eta) * N(0,I)
-        Returns: samples_kept, energies, step_trace, accept_trace
+        Perform one MALA proposal + MH accept/reject.
+
+        Proposal (matches reference parameterisation):
+            x' = x - g/L + sqrt(2/L) * beta * xi,   xi ~ N(0, I)
+
+        The noise variance is (2/L)*beta^2.  With beta=1 this is the
+        standard Langevin discretisation.  beta<1 tempers the posterior.
+
+        Returns
+        -------
+        x_new, U_new, g_new, alpha, accepted
         """
-        eta = float(self.mala_step_size)
+        xi = np.random.randn(*x.shape).astype(np.float64)
+        x_prop = x - g_x / L + np.sqrt(2.0 / L) * self.beta * xi
+
+        try:
+            U_prop = float(self.negative_log_posterior(x_prop, y))
+            g_prop = (self.data_fidelity_gradient(x_prop, y)
+                      + self.lambda_ * self.huber_tv_subgradient(x_prop)).astype(np.float64)
+        except Exception:
+            return x, U_x, g_x, 0.0, False
+
+        # MH correction: log alpha = -U(x') + U(x) + log q(x|x') - log q(x'|x)
+        # log q uses -L/4 * ||diff||^2  (see log_q docstring)
+        log_q_x_given_prop = self.log_q(x_prop, x, g_prop, L)
+        log_q_prop_given_x = self.log_q(x,      x_prop, g_x, L)
+        log_alpha = -U_prop + U_x + log_q_x_given_prop - log_q_prop_given_x
+
+        alpha = float(np.clip(np.exp(log_alpha), 0.0, 1.0))
+        accepted = (np.random.rand() < alpha)
+
+        if accepted:
+            return x_prop, U_prop, g_prop, alpha, True
+        else:
+            return x, U_x, g_x, alpha, False
+
+    def mala_sampling(self, y, x_init=None, debug=False):
+        """
+        Two-phase MALA following the structure of the reference implementation
+        (stable-deep-mri).
+
+        Phase 1 — Burn-in (n = self.burn_in iterations):
+            Run the chain with per-iteration step-size adaptation.
+            L is multiplied by 1.1 when alpha < 0.574 (step too large)
+            and divided by 1.1 when alpha >= 0.574 (step too small).
+            No samples are collected.
+
+        Phase 2 — Averaging (a = self.num_samples * self.thin iterations):
+            Collect every self.thin-th sample to form the MMSE estimate.
+            Adaptation continues with slightly more aggressive factors
+            (x2 / /1.5) to keep L tuned while sampling.
+
+        The proposal is:
+            x' = x - g/L + sqrt(2/L) * beta * xi,   xi ~ N(0,I)
+
+        which uses the inverse-step-size L instead of eta=1/L.
+        self.beta < 1 tempers the posterior (reduces effective noise),
+        helping the chain mix in high-dimensional problems.
+
+        Returns
+        -------
+        samples_kept : list of np.ndarray  (length self.num_samples)
+        energies     : list of float
+        L_trace      : np.ndarray  (step size history, stored as 1/L for readability)
+        accept_trace : np.ndarray
+        """
+        # ---------- initialisation ----------
+        L = self.L_init
+
         if x_init is None:
-            x = np.real(self.A_adj(y)).astype(np.float64) # np.real(np.fft.ifft2(y, norm='ortho')).astype(np.float64)
+            # adjoint-based zero-fill is more principled than bare ifft2
+            x = np.real(self.A_adj(y)).astype(np.float64)
         else:
             x = np.array(x_init, dtype=np.float64)
 
-        n_iters = int(self.burn_in + max(0, int(self.num_samples)) * max(1, int(self.thin)))
-        samples_kept = []
-        energies = []
-        accept_trace = np.zeros(n_iters, dtype=float)
-        step_trace = np.full(n_iters, eta, dtype=float)
-
-        # accepted_list = []
-        # total_list = []
-        accepted = 0
-        total = 0
-
-        def U(z):
-            return float(self.negative_log_posterior(z, y))
-
         def gradU(z):
-            g = (self.data_fidelity_gradient(z, y) + self.lambda_ * self.huber_tv_subgradient(z))
-            return g.astype(np.float64)
+            return (self.data_fidelity_gradient(z, y)
+                    + self.lambda_ * self.huber_tv_subgradient(z)).astype(np.float64)
 
-        U_x = U(x)
+        U_x = float(self.negative_log_posterior(x, y))
+        g_x = gradU(x)
 
-        # --- diagnostic: run once before loop ---
-        g_x_init = gradU(x)
-        gnorm = np.linalg.norm(g_x_init)
-        print(f"Initial U: {U_x:.4e}")
-        print(f"Initial grad norm: {gnorm:.4e}")
-        print(f"Drift magnitude (0.5*eta*||g||): {0.5*eta*gnorm:.4e}")
-        print(f"Noise magnitude (sqrt(eta)*sqrt(d)): {np.sqrt(eta)*np.sqrt(x.size):.4e}")
+        if debug:
+            gnorm = np.linalg.norm(g_x)
+            print(f"[MALA init]  U={U_x:.4e}  ||g||={gnorm:.4e}")
+            print(f"             L={L:.4e}  drift=||g||/L={gnorm/L:.4e}")
+            print(f"             noise=sqrt(2/L)*beta*sqrt(d)="
+                  f"{np.sqrt(2.0/L)*self.beta*np.sqrt(x.size):.4e}")
 
-        # ----- new -------
-        # Warm-up: if the initial step size is catastrophic in high dimension,
-        # quickly shrink it before entering the chain.
-        for _ in range(8):
-            g0 = gradU(x)
-            if clip_grad is not None:
-                g0_norm = np.linalg.norm(g0)
-                if g0_norm > clip_grad:
-                    g0 = g0 * (clip_grad / (g0_norm + 1e-16))
-            z0 = np.random.randn(*x.shape).astype(np.float64)
-            x0_prop = x - 0.5 * eta * g0 + np.sqrt(eta) * z0
-            U0_prop = U(x0_prop)
-            g0_prop = gradU(x0_prop)
-            log_alpha0 = -U0_prop + U_x + self.log_q(x0_prop, x, g0_prop, eta) - self.log_q(x, x0_prop, g0, eta)
-            if np.isfinite(log_alpha0) and log_alpha0 > -10:
-                break
-            eta *= 0.5
+        # ---------- Phase 1: burn-in with per-step adaptation ----------
+        n_burn = int(self.burn_in)
+        burn_accepts = 0
 
-        self.mala_step_size = eta
+        for i in range(n_burn):
+            x, U_x, g_x, alpha, accepted = self._mala_step(x, U_x, g_x, L, y)
 
-        for i in range(n_iters):
-            g_x = gradU(x) 
-            # optional gradient clipping
-            if clip_grad is not None:
-                gnorm = np.linalg.norm(g_x)
-                if gnorm > clip_grad:
-                    g_x = g_x * (clip_grad / (gnorm + 1e-16))
-
-            # proposal (standard MALA)
-            z_noise = np.random.randn(*x.shape).astype(np.float64)
-            x_prop = x - 0.5 * eta * g_x + np.sqrt(eta) * z_noise
-
-            # compute target and grad at proposal
-            try:
-                U_prop = U(x_prop)
-                g_prop = gradU(x_prop)
-            except Exception:
-                U_prop = np.inf
-                g_prop = np.zeros_like(x)
-
-            # asymmetric proposal correction: log q(x | x_prop) - log q(x_prop | x)
-            log_q_x_given_prop = self.log_q(x_prop, x, g_prop, eta) # q(x | x')
-            log_q_prop_given_x = self.log_q(x, x_prop, g_x, eta) # q(x' | x)
-            log_alpha = -U_prop + U_x + log_q_x_given_prop - log_q_prop_given_x
-
-            # numeric safe alpha
-            if log_alpha >= 0:
-                alpha = 1.0
+            # per-iteration multiplicative adaptation (same logic as reference)
+            if alpha < 0.574:
+                L *= 1.1   # acceptance too low  -> step too large -> increase L
             else:
-                alpha = float(np.exp(log_alpha))
+                L /= 1.1   # acceptance too high -> step too small -> decrease L
+            L = float(np.clip(L, 1e-3, 1e15))
 
-            accept = (np.random.rand() < alpha)
-            if accept:
-                x = x_prop
-                U_x = U_prop
-
-            accept_trace[i] = 1.0 if accept else 0.0
-            step_trace[i] = eta
-            energies.append(U_x)
-
-            # update accepted/total lists
-            total += 1
-            if accept:
-                accepted += 1
-
-            # --- diagnostic ---
-            if i == 0:
-                print(f"U_prop:               {U_prop:.4e}")
-                print(f"U_x:                  {U_x:.4e}")
-                print(f"log_q(x|x'):          {log_q_x_given_prop:.4e}")
-                print(f"log_q(x'|x):          {log_q_prop_given_x:.4e}")
-                print(f"log_alpha:            {log_alpha:.4e}")
-
-            if debug and (i % 50 == 0):
-                data_term = 0.5 * np.linalg.norm(self.A(x) - y)**2 / self.sigma**2
-                prior_term = self.lambda_ * self.huber_tv_2d(x)
-                print(f"iter {i:4d} data={data_term:.3e} prior={prior_term:.3e} total={data_term + prior_term:.3e}")
-                #print(f"MALA iter {i:4d} U={U_x:.4e} accept_rate={accept_trace[:i+1].mean():.3f} gnorm={np.linalg.norm(g_x):.3e}")
+            burn_accepts += int(accepted)
 
             if not np.all(np.isfinite(x)):
-                print("Non-finite state at iter", i, "- stopping.")
+                print(f"Non-finite state at burn-in iter {i} — stopping.")
                 break
 
             if debug and i % 100 == 0:
-                TV = self.huber_tv_2d(x) # current TV(x)
-                data_term = np.linalg.norm(self.A(x) - y)**2 / (2 * self.sigma**2)  # current data term
+                print(f"[burn-in {i:4d}]  U={U_x:.4e}  alpha={alpha:.3f}"
+                      f"  L={L:.4e}  eta=1/L={1/L:.4e}"
+                      f"  acc_rate={burn_accepts/(i+1):.3f}")
 
-                r = 0.1  # target prior : data ratio (10%)
-                lambda_needed = (r * data_term) / (TV + 1e-12)
+        print(f"Burn-in done.  accept_rate={burn_accepts/n_burn:.4f}  "
+              f"final L={L:.4e}  eta=1/L={1/L:.4e}")
 
-                print(f"TV={TV:.4f}, data={data_term:.3e}, lambda_needed={lambda_needed:.3f}")
+        # ---------- Phase 2: averaging / sample collection ----------
+        n_avg   = int(self.num_samples) * int(self.thin)
+        samples_kept = []
+        energies     = []
+        accept_trace = np.zeros(n_avg, dtype=float)
+        L_trace      = np.zeros(n_avg, dtype=float)   # stored as eta=1/L
+        avg_accepts  = 0
+
+        for i in range(n_avg):
+            x, U_x, g_x, alpha, accepted = self._mala_step(x, U_x, g_x, L, y)
+
+            # slightly more aggressive adaptation during averaging
+            # (mirrors reference: factors 2 and 1/1.5 in averaging phase)
+            if alpha < 0.574:
+                L *= 2.0
+            else:
+                L /= 1.5
+            L = float(np.clip(L, 1e-3, 1e15))
+
+            avg_accepts += int(accepted)
+            accept_trace[i] = float(accepted)
+            L_trace[i]      = 1.0 / L
+            energies.append(U_x)
+
+            if not np.all(np.isfinite(x)):
+                print(f"Non-finite state at averaging iter {i} — stopping.")
+                break
 
             if debug and i % 100 == 0:
-                g_data = self.data_fidelity_gradient(x, y)
-                g_prior = self.huber_tv_subgradient(x)
+                print(f"[avg    {i:4d}]  U={U_x:.4e}  alpha={alpha:.3f}"
+                      f"  L={L:.4e}  acc_rate={avg_accepts/(i+1):.3f}")
 
-                print("‖g_data‖ =", np.linalg.norm(g_data))
-                print("‖g_prior‖ =", np.linalg.norm(g_prior))
-                print("ratio g_prior/g_data =", np.linalg.norm(g_prior)/np.linalg.norm(g_data))
-
-            # store after burn-in with thinning using class params
-            if i >= self.burn_in and ((i - self.burn_in) % self.thin == 0):
+            # collect with thinning
+            if i % self.thin == 0:
                 samples_kept.append(np.copy(x))
 
-            # # safe adaptive step tuning during burn-in (ensure enough history)
-            # if (i + 1) % 200 == 0 and i < self.burn_in:
-            #     window = min(200, len(accept_trace[:i+1]))
-            #     recent_accept = np.mean(accept_trace[max(0, i+1-window):i+1])
-            #     if recent_accept > 0.65:
-            #         eta *= 1.2
-            #     elif recent_accept < 0.45:
-            #         eta *= 0.7
-            #     eta = float(np.clip(eta, 1e-12, 1e-1))
-            #     self.mala_step_size = eta  # update stored step
+        print(f"Averaging done. accept_rate={avg_accepts/n_avg:.4f}  "
+              f"samples_collected={len(samples_kept)}")
 
-            # # gentle adaptive tuning during burn-in (multiplicative log-update)
-            # if (i + 1) % 30 == 0 and i < self.burn_in:
-            #     adapt_window = min(30, i + 1)
-            #     min_window = 30  # require at least this many iters to adapt
-            #     if adapt_window >= min_window:
-            #         recent_accept = np.mean(accept_trace[i + 1 - adapt_window : i + 1])
-            #         # optimal target around 0.574 for MALA (Roberts & Rosenthal 1998)
-            #         target_accept = 0.574
-            #         # small gain for stability (increase => larger steps when accept>target)
-            #         gamma = 0.25
-            #         eta *= float(np.exp(gamma * (recent_accept - target_accept)))
-            #         eta = float(np.clip(eta, 1e-12, 1e-1))
-            #         self.mala_step_size = eta 
-
-            # ------- new -------
-            # Robbins-Monro adaptation during burn-in only.
-            # After burn-in, eta is fixed to preserve stationarity.
-            if i < self.burn_in:
-                target_accept = 0.57
-                # Decreasing adaptation scale improves stability.
-                gamma_i = 0.08 / np.sqrt(i + 1.0)
-                eta *= float(np.exp(gamma_i * ((1.0 if accept else 0.0) - target_accept)))
-                eta = float(np.clip(eta, 1e-12, 1e-1))
-                self.mala_step_size = eta   
-
-            # ------ new -----
-            # emergency safety: when stuck with many consecutive rejections,
-            # force a stronger reduction of eta.
-            if i < self.burn_in and (i + 1) % 50 == 0:
-                recent_reject_window = min(50, i + 1)
-                recent_accept = np.mean(accept_trace[i + 1 - recent_reject_window : i + 1])
-                if recent_accept < 0.02:
-                    eta = float(max(1e-12, eta * 0.2))
-                    self.mala_step_size = eta
-
-        # compute and print acceptance rate using the lists
-        acc_rate = accepted / total if total > 0 else 0.0
-        print(f"MALA acceptance rate: {acc_rate:.4f} ({accepted}/{total})")
-
-        # fallback
         if len(samples_kept) == 0:
             print("Warning: no samples kept; returning last state.")
             samples_kept = [np.copy(x)]
 
-        return samples_kept, energies, step_trace[:len(energies)], accept_trace[:len(energies)]
+        return samples_kept, energies, L_trace, accept_trace
     
     def compute_mmse_estimate(self, samples):
         """
         Compute MMSE estimate = mean over MALA posterior samples.
         """
-
+       
         try:
             arr = np.stack(samples, axis=0)   # shape (N, H, W)
         except Exception as e:
@@ -425,6 +409,7 @@ class MMSEEstimatorMALA:
 
         return np.mean(arr, axis=0)
     
+        # x_mmse = np.mean(arr, axis=0)
         # x_mmse = np.nan_to_num(x_mmse)
         # denom = x_mmse.max() - x_mmse.min()
         # if denom > 0:
