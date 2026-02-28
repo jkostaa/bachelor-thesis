@@ -41,13 +41,15 @@ class MAPEstimator:
         # alt: x = x / np.max(np.abs(x))  # normalize to max=1, if max != 0
 
         # self.M * np.fft.fft2(x) / np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(x), norm='ortho'))
-        return self.M * np.fft.fft2(x, norm='ortho') 
+        #return self.M * np.fft.fft2(x, norm='ortho')
+        return self.M * np.fft.fftshift(np.fft.fft2(x, norm='ortho')) # in use
 
     def A_adj(self, k_residual):
         """
         Compute the adjoint of A
         """
-        return np.fft.ifft2(self.M * k_residual, norm='ortho')  
+        #return np.fft.ifft2(self.M * k_residual, norm='ortho')
+        return np.fft.ifft2(np.fft.ifftshift(self.M * k_residual), norm='ortho') # in use
 
     def adjoint_test(self, shape):
         """
@@ -257,7 +259,8 @@ class MAPEstimator:
         # x = np.zeros_like(np.fft.ifft2(y).real)
 
         if x_init is None:
-            x = np.real(np.fft.ifft2(y, norm='ortho')) # or np.abs()?
+            #x = np.real(np.fft.ifft2(np.fft.ifftshift(y), norm='ortho'))
+            x = np.real(self.A_adj(y)) # cleaner
         else:
             x = np.array(x_init, dtype=float)
 

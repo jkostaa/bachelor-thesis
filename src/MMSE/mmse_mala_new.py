@@ -32,13 +32,15 @@ class MMSEEstimatorMALA:
         Compute the composition of 2D discrete Fourier Transform + apply mask
         Returns a (complex) ndarray type
         """
-        return self.M * np.fft.fft2(x, norm='ortho') 
+        #return self.M * np.fft.fft2(x, norm='ortho') 
+        return self.M * np.fft.fftshift(np.fft.fft2(x, norm='ortho')) # in use
 
     def A_adj(self, k_residual):
         """
         Compute the adjoint of A
         """
-        return np.fft.ifft2(self.M * k_residual, norm='ortho')  
+        #return np.fft.ifft2(self.M * k_residual, norm='ortho')  
+        return np.fft.ifft2(np.fft.ifftshift(self.M * k_residual), norm='ortho') # in use
 
     # Gradients and TV
 
