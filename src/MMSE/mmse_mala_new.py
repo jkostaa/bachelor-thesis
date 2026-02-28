@@ -245,8 +245,8 @@ class MMSEEstimatorMALA:
         -------
         x_new, U_new, g_new, alpha, accepted
         """
-        xi = np.random.randn(*x.shape).astype(np.float64)
-        x_prop = x - g_x / L + np.sqrt(2.0 / L) * self.beta * xi
+        xi = np.random.randn(*x.shape).astype(np.float64) # noise
+        x_prop = x - g_x / L + np.sqrt(2.0 / L) * self.beta * xi # proposal
 
         try:
             U_prop = float(self.negative_log_posterior(x_prop, y))
@@ -257,8 +257,8 @@ class MMSEEstimatorMALA:
 
         # MH correction: log alpha = -U(x') + U(x) + log q(x|x') - log q(x'|x)
         # log q uses -L/4 * ||diff||^2  (see log_q docstring)
-        log_q_x_given_prop = self.log_q(x_prop, x, g_prop, L)
-        log_q_prop_given_x = self.log_q(x,      x_prop, g_x, L)
+        log_q_x_given_prop = self.log_q(x_prop, x, g_prop, L) # q(x | x')
+        log_q_prop_given_x = self.log_q(x,      x_prop, g_x, L) # q(x' | x)
         log_alpha = -U_prop + U_x + log_q_x_given_prop - log_q_prop_given_x
 
         alpha = float(np.clip(np.exp(log_alpha), 0.0, 1.0))
@@ -269,10 +269,9 @@ class MMSEEstimatorMALA:
         else:
             return x, U_x, g_x, alpha, False
 
-    def mala_sampling(self, y, x_init=None, debug=False):
+    def mala_sampling(self, y, x_init=None, debug=False, freeze_L_after_burnin=True):
         """
-        Two-phase MALA following the structure of the reference implementation
-        (stable-deep-mri).
+        Two-phase MALA.
 
         Phase 1 — Burn-in (n = self.burn_in iterations):
             Run the chain with per-iteration step-size adaptation.
@@ -282,8 +281,12 @@ class MMSEEstimatorMALA:
 
         Phase 2 — Averaging (a = self.num_samples * self.thin iterations):
             Collect every self.thin-th sample to form the MMSE estimate.
-            Adaptation continues with slightly more aggressive factors
-            (x2 / /1.5) to keep L tuned while sampling.
+            -> freeze_L_after_burnin=True (default): L is held fixed at the
+            value found during burn-in.  This prevents the wild step-size
+            oscillations caused by the reference's aggressive x2/div1.5
+            actors, which were tuned for a learned neural prior, not Huber-TV.
+            -> freeze_L_after_burnin=False: the same gentle 1.1 factor used in
+            burn-in continues, which is a safe adaptive compromise.
 
         The proposal is:
             x' = x - g/L + sqrt(2/L) * beta * xi,   xi ~ N(0,I)
@@ -347,8 +350,9 @@ class MMSEEstimatorMALA:
                       f"  L={L:.4e}  eta=1/L={1/L:.4e}"
                       f"  acc_rate={burn_accepts/(i+1):.3f}")
 
+        L_frozen = L
         print(f"Burn-in done.  accept_rate={burn_accepts/n_burn:.4f}  "
-              f"final L={L:.4e}  eta=1/L={1/L:.4e}")
+              f"final L={L_frozen:.4e}  eta=1/L={1/L_frozen:.4e}")
 
         # ---------- Phase 2: averaging / sample collection ----------
         n_avg   = int(self.num_samples) * int(self.thin)
@@ -361,13 +365,17 @@ class MMSEEstimatorMALA:
         for i in range(n_avg):
             x, U_x, g_x, alpha, accepted = self._mala_step(x, U_x, g_x, L, y)
 
-            # slightly more aggressive adaptation during averaging
-            # (mirrors reference: factors 2 and 1/1.5 in averaging phase)
-            if alpha < 0.574:
-                L *= 2.0
+            if freeze_L_after_burnin:
+                # hold L fixed at the burn-in value: step size is stable,
+                # energy trace should be stationary, samples are comparable
+                pass
             else:
-                L /= 1.5
-            L = float(np.clip(L, 1e-3, 1e15))
+                # continue gentle 1.1 adaptation
+                if alpha < 0.574:
+                    L *= 1.1
+                else:
+                    L /= 1.1
+                L = float(np.clip(L, 1e-3, 1e15))
 
             avg_accepts += int(accepted)
             accept_trace[i] = float(accepted)
