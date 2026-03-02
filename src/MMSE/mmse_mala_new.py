@@ -137,14 +137,13 @@ class MMSEEstimatorMALA:
 
         return -self.divergence(grad_dx, grad_dy)
 
-    def compute_loss(self, x, y): # check maybe if data_term is correct (2* sigma or just sigma)
-        '''
-        Function to compute the loss (used later in the subgradient descent function
-        to plot the loss over iterations)
-        '''
-        data_term = np.linalg.norm(self.A(x) - y) ** 2 / (2 * self.sigma**2)
-        tv_term = self.lambda_ * self.huber_tv_2d(x)
-        return data_term + tv_term
+    # def compute_loss(self, x, y):
+    #     '''
+    #     Function to compute the loss
+    #     '''
+    #     data_term = np.linalg.norm(self.A(x) - y) ** 2 / (2 * self.sigma**2)
+    #     tv_term = self.lambda_ * self.huber_tv_2d(x)
+    #     return data_term + tv_term
     
     def negative_log_posterior(self, x, y):
         # U(x) = 0.5 / sigma^2 * ||M(x)-y||^2 + lambda*TV(x)

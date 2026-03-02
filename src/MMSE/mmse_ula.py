@@ -17,16 +17,18 @@ class MMSEEstimatorULA:
         Compute the composition of 2D discrete Fourier Transform + apply mask
         Returns a (complex) ndarray type
         """
-        return self.M * np.fft.fft2(x, norm='ortho') 
+        #return self.M * np.fft.fft2(x, norm='ortho') 
+        return self.M * np.fft.fftshift(np.fft.fft2(x, norm='ortho')) # in use
+
 
     def A_adj(self, k_residual):
         """
         Compute the adjoint of A
         """
-        return np.fft.ifft2(self.M * k_residual, norm='ortho')  
+        #return np.fft.ifft2(self.M * k_residual, norm='ortho')  
+        return np.fft.ifft2(np.fft.ifftshift(self.M * k_residual), norm='ortho') # in use
 
     # Gradients and TV
-
     def data_fidelity_gradient(self, x, y):
         """
         Gradient of data fidelity term:
@@ -205,44 +207,8 @@ class MMSEEstimatorULA:
 
         return np.mean(arr, axis=0) 
     
-        # x_mmse = np.mean(arr, axis=0)
-        # x_mmse = np.nan_to_num(x_mmse)
-        # denom = x_mmse.max() - x_mmse.min()
-        # if denom > 0:
-        #     normalized_mmse = (x_mmse - x_mmse.min()) / denom
-        # else:
-        #     normalized_mmse = x_mmse
-        # return normalized_mmse
-    
-    def compute_variance_map(self, y, x_init=None):
-        """Compute pixelwise variance map from posterior samples."""
-        samples, energies = self.ula_sampling(y)
-        variance_map = np.var(samples, axis=0)
-        return variance_map
-
-
-    # def autocorr(self, x): # diagnsotic
-    #     # If autocorrelation stays >0.9 → not moving → step too small
-    #     # f oscillatory → step too large
-    #     # If decays smoothly → good
-    #     x = x - x.mean()
-    #     corr = np.correlate(x, x, mode='full')
-    #     corr = corr[corr.size//2:]
-    #     return corr / corr[0]
-        '''
-    def plot_variance_map(self, variance_map, cmap="magma", vmax=None):
-        """
-        Visualize the posterior variance map.
-
-        variance_map : ndarray
-        cmap : str
-        vmax : float or None
-        """
-        plt.figure(figsize=(6, 6))
-        plt.imshow(variance_map, cmap=cmap, vmax=vmax)
-        plt.colorbar(label="Posterior Variance")
-        plt.title("Posterior Uncertainty Map (Variance)")
-        plt.axis("off")
-
-        plt.show()
-        '''
+    # def compute_variance_map(self, y, x_init=None):
+    #     """Compute pixelwise variance map from posterior samples."""
+    #     samples, energies = self.ula_sampling(y)
+    #     variance_map = np.var(samples, axis=0)
+    #     return variance_map
