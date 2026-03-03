@@ -258,7 +258,7 @@ class UniformColumnMask:
     def get_mask(self):
         return self.mask
 
-class PseudoRandomColumnMask:
+class Gaussian1DColumnMask:
     def __init__(self, shape, acceleration, lam, seed=None):
         """
         Parameters:
@@ -328,6 +328,75 @@ class PseudoRandomColumnMask:
     def get_mask(self):
         return self.mask
     
+class Gaussian1DRowMask:
+    def __init__(self, shape, acceleration, lam, seed=None):
+        """
+        Parameters:
+        - shape: tuple (h, w)
+        - acceleration: int, undersampling factor (e.g., 2, 4, 6 or 8)
+        - lam: float, decay parameter (e.g. 4)
+        - seed: random seed for reproducibility
+        """
+
+        assert acceleration in [2, 4, 6, 8], "Only acceleration factors 2, 4, 6 and 8 are supported."
+
+        self.shape = shape
+        self.acceleration = acceleration
+        self.lam = lam
+        self.seed = seed
+        if seed is not None:
+            np.random.seed(seed)
+
+        self.mask = self._create_mask()
+
+    def _create_mask(self):
+        height, width = self.shape
+
+        if self.acceleration == 2:
+            center_fraction = 0.1
+        elif self.acceleration == 4:
+            center_fraction = 0.08
+        elif self.acceleration == 6:
+            center_fraction = 0.06
+        elif self.acceleration == 8:
+            center_fraction = 0.04
+
+        center_rows = int(round(height * center_fraction))
+        if center_rows % 2 == 0:
+            center_rows += 1  # odd for symmetry
+
+        mask = np.zeros((height, width), dtype=np.float32)
+
+        # fill in the center region (centred vertically)
+        center_start = height // 2 - center_rows // 2
+        center_end = center_start + center_rows
+        mask[center_start:center_end, :] = 1.0
+
+        total_sampled_rows = int(round(height / self.acceleration))
+
+        num_random_rows = total_sampled_rows - center_rows
+        if num_random_rows < 0:
+            num_random_rows = 0
+            return mask
+
+        distances = np.abs(np.arange(height) - height / 2)
+        distances = distances / np.max(distances)  # normalize [0, 1]
+
+        probs = np.exp(-self.lam * distances**2)  # gaussian decay
+
+        probs[center_start:center_end] = 0
+        probs = probs / np.sum(probs)
+
+        candidate_rows = np.arange(height)
+        random_rows = np.random.choice(candidate_rows, size=num_random_rows, replace=False, p=probs)
+        mask[random_rows, :] = 1.0
+
+        return mask
+
+    def get_mask(self):
+        return self.mask
+
+
 
 class RadialMask:
     def __init__(self, shape, num_spokes, center_fraction=0.05):
