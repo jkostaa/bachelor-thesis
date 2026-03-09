@@ -89,7 +89,7 @@ class MAPEstimator:
         """
 
         residual = self.A(x) - y
-        grad = self.A_adj(residual)  #/ self.sigma**2 
+        grad = self.A_adj(residual)  / self.sigma**2 
         return np.real(grad) #(grad.real) 
 
     def finite_diff_gradient(self, x):  # we are assuming that x is a 2D image
@@ -244,7 +244,7 @@ class MAPEstimator:
         Function to compute the loss (used later in the subgradient descent function
         to plot the loss over iterations)
         '''
-        data_term = 0.5 * np.linalg.norm(self.A(x) - y) ** 2 #/ (2 * self.sigma**2)
+        data_term = 0.5 * np.linalg.norm(self.A(x) - y) ** 2 / self.sigma**2
         tv_term = self.lambda_ * self.huber_tv_2d(x)
         return data_term + tv_term
 
@@ -290,15 +290,15 @@ class MAPEstimator:
             loss = self.compute_loss(x, y)
             self.loss_history.append(loss)
 
-            if i % 50 == 0:
-                print(f"Iter {i}: Loss = {loss:.4f}")
-                print(f"Iter {i}: Gradient = {grad_norm:.4f}")
-                #print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
-                print("data_term =", 0.5 * np.linalg.norm(self.A(x) - y)**2)
-                print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
-                #print("||grad_data|| =", np.linalg.norm(gradient_data))
-                #print("||grad_tv|| =", np.linalg.norm(gradient_tv))
-                #print("grad min/max:", gradient.min(), gradient.max())
+            # if i % 50 == 0:
+            #     print(f"Iter {i}: Loss = {loss:.4f}")
+            #     print(f"Iter {i}: Gradient = {grad_norm:.4f}")
+            #     #print("||A(x)-y||_2 =", np.linalg.norm(self.A(x) - y))
+            #     print("data_term =", 0.5 * np.linalg.norm(self.A(x) - y)**2)
+            #     print("tv_term =", self.lambda_ * self.huber_tv_2d(x))
+            #     #print("||grad_data|| =", np.linalg.norm(gradient_data))
+            #     #print("||grad_tv|| =", np.linalg.norm(gradient_tv))
+            #     #print("grad min/max:", gradient.min(), gradient.max())
 
         return x
 

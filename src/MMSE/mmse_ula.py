@@ -141,7 +141,8 @@ class MMSEEstimatorULA:
             Clip gradient norm - helps with num. stability when gradients become very large. Recommended: 100-500 depending on problem scale.
         """
         if x_init is None:
-            x = np.real(np.fft.ifft2(y, norm='ortho')).astype(np.float64)
+            # x = np.real(np.fft.ifft2(y, norm='ortho'))
+            x = np.abs(np.fft.ifft2(y, norm='ortho'))
         else:
             x = np.array(x_init, dtype=np.float64)
 
@@ -173,11 +174,11 @@ class MMSEEstimatorULA:
 
             loss = self.compute_loss(x, y)
 
-            if verbose and i % 200 == 0:
-                print(f"Iter {i}: Loss = {loss:.4f}")
-                print(f"Iter {i}: Gradient norm = {grad_norm:.4e}")
-                print(f"  data_term = {0.5 * np.linalg.norm(self.A(x) - y)**2 / self.sigma**2:.4e}")
-                print(f"  tv_term = {self.lambda_ * self.huber_tv_2d(x):.4e}")
+            # if verbose and i % 200 == 0:
+            #     print(f"Iter {i}: Loss = {loss:.4f}")
+            #     print(f"Iter {i}: Gradient norm = {grad_norm:.4e}")
+            #     print(f"  data_term = {0.5 * np.linalg.norm(self.A(x) - y)**2 / self.sigma**2:.4e}")
+            #     print(f"  tv_term = {self.lambda_ * self.huber_tv_2d(x):.4e}")
 
 
             energy = float(self.compute_loss(x, y))
