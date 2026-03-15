@@ -141,8 +141,8 @@ class MMSEEstimatorULA:
             Clip gradient norm - helps with num. stability when gradients become very large. Recommended: 100-500 depending on problem scale.
         """
         if x_init is None:
-            # x = np.real(np.fft.ifft2(y, norm='ortho'))
-            x = np.abs(np.fft.ifft2(y, norm='ortho'))
+            x = np.real(np.fft.ifft2(y, norm='ortho')) # cleaner
+            # x = np.abs(np.fft.ifft2(y, norm='ortho'))
         else:
             x = np.array(x_init, dtype=np.float64)
 
